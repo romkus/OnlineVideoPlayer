@@ -1,0 +1,37 @@
+[API]
+Name=Shell Lightweight Utility API
+Version=1.0
+Date=03-12-99
+Originated=Platform SDK
+URL=http://msdn.microsoft.com
+Description=Microsoft Shell Lightweight Utility API
+[Platform]
+Win31=No
+Win95=Yes
+Win98=Yes
+WinNT3=No
+WinNT4=Yes
+Win2000=Yes
+[Requirements]
+Req0=Internet Explorer 5
+[Captain]
+Name=Marcel van Brakel
+Email=brakelm@bart.nl
+HomePage=
+[Converters]
+Converter1="Marcel van Brakel",brakelm@chello.nl,
+[Testers]
+Testers1="Dominique Louis",Dominique@SavageSoftware.com.au,
+Testers2="Bruno Sonnino",sonnino@netmogi.com.br,
+Testers3="Emerson A. Chen",EmersonC@ix.netcom.com,
+[CONVERSION1]
+FileName=ShLwApi.pas
+FileDate=30-Nov-1999
+Status=Ready
+Version=1.0
+LastModify=20-Jun-2005
+OriginalFile=shlwapi.h
+[CONVERSION]
+MajorVersion=1
+MinorVersion=2
+Number=1

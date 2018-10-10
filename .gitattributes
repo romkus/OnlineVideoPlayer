@@ -1,2 +1,15 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+*.cfg text working-tree-encoding=Windows-1251 eol=crlf
+*.dpr text working-tree-encoding=Windows-1251 eol=crlf
+*.pas text working-tree-encoding=Windows-1251 eol=crlf
+*.dfm text working-tree-encoding=Windows-1251 eol=crlf
+*.txt text working-tree-encoding=Windows-1251 eol=crlf
+*.PAS text working-tree-encoding=Windows-1251 eol=crlf
+*.DPR text working-tree-encoding=Windows-1251 eol=crlf
+*.dof text working-tree-encoding=Windows-1251 eol=crlf
+*.DOF text working-tree-encoding=Windows-1251 eol=crlf
+*.ini text working-tree-encoding=Windows-1251 eol=crlf
+*.log text working-tree-encoding=Windows-1251 eol=crlf
+*.md text eol=crlf

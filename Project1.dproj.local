@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<BorlandProject>
+	<Transactions>
+    <Transaction>2011.11.26 22:33:57.464.pas,C:\Users\User\Documents\RAD Studio\Projects\Unit1.pas=C:\Users\User\Documents\RAD Studio\Projects\onlinevideo\Unit1.pas</Transaction>
+    <Transaction>2011.11.26 22:33:57.465.dfm,C:\Users\User\Documents\RAD Studio\Projects\Unit1.dfm=C:\Users\User\Documents\RAD Studio\Projects\onlinevideo\Unit1.dfm</Transaction>
+    <Transaction>2011.11.26 22:33:59.563.dproj,C:\Users\User\Documents\RAD Studio\Projects\Project1.dproj=C:\Users\User\Documents\RAD Studio\Projects\onlinevideo\Project1.dproj</Transaction>
+    <Transaction>2014.06.27 16:55:32.296.pas,G:\Install\Programming\Delphi 2009\Literature\ДоступДоВiдеоКамер\Через DirectShow\Урок 4.1.OnlineTV player\onlinevideoplayer\Unit2.pas=G:\Install\Programming\Delphi 2009\Literature\ДоступДоВiдеоКамер\Через DirectShow\Урок 4.1.OnlineTV player\onlinevideoplayer\UDirectShowHelp.pas</Transaction>
+    <Transaction>2014.06.30 15:21:23.670.pas,G:\Install\Programming\Delphi 2009\Literature\ДоступДоВiдеоКамер\Через DirectShow\Урок 4.1.OnlineTV player\onlinevideoplayer\DataHelper.pas=</Transaction>
+    <Transaction>2014.07.01 16:53:25.092.pas,G:\Install\Programming\Delphi 2009\Literature\ДоступДоВiдеоКамер\Через DirectShow\Урок 4.1.OnlineTV player\onlinevideoplayer\uComPort.pas=</Transaction>
+    <Transaction>2014.07.15 16:11:09.562.pas,D:\Мои документы\1C8\Зовнiшнi_компоненти\onlinevideoplayer\Unit2.pas=D:\Мои документы\1C8\Зовнiшнi_компоненти\onlinevideoplayer\ErrorDecoder.pas</Transaction>
+    <Transaction>2014.07.15 16:16:08.750.pas,D:\Мои документы\1C8\Зовнiшнi_компоненти\onlinevideoplayer\Unit2.pas=D:\Мои документы\1C8\Зовнiшнi_компоненти\onlinevideoplayer\UEventHelper.pas</Transaction>
+    <Transaction>2014.07.15 16:16:44.953.pas,D:\Мои документы\1C8\Зовнiшнi_компоненти\onlinevideoplayer\ErrorDecoder.pas=D:\Мои документы\1C8\Зовнiшнi_компоненти\onlinevideoplayer\UErrorDecoder.pas</Transaction>
+    <Transaction>2015.07.09 13:39:59.568.pas,D:\Мои документы\1C8\Зовнiшнi_компоненти\onlinevideoplayer\UEventHelper.pas=</Transaction>
+  </Transactions>
+</BorlandProject>

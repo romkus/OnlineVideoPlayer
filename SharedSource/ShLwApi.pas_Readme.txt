@@ -1,0 +1,56 @@
+[KNOWN ISSUES]
+
+The API is targeted at C/C++ programmers. It's available for Delphi programmers but
+most string and path functions are akward to use due to the heavy use of pointers.
+Furthermore, the documentation on a lot of functions is very poor, sometimes incorrect
+and/or incomplete and sometimes even non-existent. Finally, some functions (mostly
+the string and path functions) produce access violations if the parameters are incorrect.
+
+Some of the functions/macro's we're not translated using the .par syntax. They are manually
+translated and use the IFDEF UNICODE idiom.
+
+SHOpenRegStream defaults to SHOpenRegStream2 in the original header. This is not the
+case in the interface unit. If you want SHOpenRegStream2 then explicitly use SHOpenRegStream2!
+
+[IMPLEMENTATION]
+
+[TESTER REPORTS]
+
+[ASSOCIATED WORK]
+
+[FILE MAPPING]
+
+[DEFINES]
+
+Although the _WIN32_IE_5 conditional is supposed to exclude all functions that require
+IE5 if defined, this is really not True. Approximately 15 functions we're added to
+ShLwApi in the March 99 release and all of them require IE5 (installed by default
+on Windows 2000). See also BugList&Fixes below.
+
+_WIN32_IE_5        If not defined then functions that require IE 5 are not available
+_WIN32_IE_501      If not defined then functions that require IE 5.01 are not available
+
+UNICODE		   Some functions/macro's could not be translated using the .par syntax
+		   and we're translated "manually". These functions use the UNICODE 
+		   conditional directive to set the default for the functions (eg
+		   MyFunction = MyFunctionA or MyFunction = MyFunctionW).
+
+The following defines are of no use for Delphi programmers. The linker already removes
+all non-referenced functions anyway. The C++ linker does not automatically does so
+and hence these defines exist. I only included them for completeness.
+
+NO_SHLWAPI_STRFCNS If defined then string functions are not available
+NO_SHLWAPI_PATH    If defined then path functions are not available
+NO_SHLWAPI_REG     If defined then registry functions are not available
+NO_SHLWAPI_STREAM  If defined then stream functions are not available
+NO_SHLWAPI_GDI     If defined then gdi functions are not available
+
+[BUGLIST&FIXES]
+
+June 20, 2005
+- fixed CLSID_QueryAssociations, IQueryAssociation.GetEnum, AssocCreate
+
+May 5, 2001
+
+- Updated unit to Februari 2001 Platform SDK release (non-Whistler)
+- Included _WIN32_IE_5 conditionals for all IE 5 functions based on modifications by Zweitze de Vries
