@@ -7,4 +7,4 @@ Features:
   - Play sound;
   - Grab series of video frames and save them to jpeg files.
 
-Some parts of code was taken from Romix (http://www.x-romix.narod.ru/) and some other were found on http://basicsprog.ucoz.ru/publ/6-1-0-32
+Some parts of code were taken from Romix (http://www.x-romix.narod.ru/) and some other were found on http://basicsprog.ucoz.ru/publ/6-1-0-32
