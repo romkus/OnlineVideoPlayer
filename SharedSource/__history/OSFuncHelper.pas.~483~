@@ -1,7 +1,7 @@
 unit OSFuncHelper;
 
 interface
-uses SysUtils, Classes, Windows, SysConst, AnsiStrings, Registry, DataHelper;
+uses SysUtils, Classes, Windows, SysConst, AnsiStrings, Registry, SyncObjs, DataHelper;
 
 const
           c_SystemSays = 'Система каже:';
@@ -91,6 +91,8 @@ const
       MB_AllMessageBoxWndTypeMask = $00FF0000;
       ci_DefOkMsgBoxType = MB_OK or MB_TOPMOST;
 
+      ic_MessageSpeedTimeUnit = 1000;  // 1000 мс.
+
 type
   TNTSTATUS = DWord;
 
@@ -143,6 +145,25 @@ type
       property LogFile: TLogFile read cLogFile write cLogFile;
   end;
 
+  TAdvancedTerminatedThread = class(TThread)
+  private
+//    cResumeCalledBeforeSuspend: Boolean;
+    //cSuspendResumeUseSection: TCriticalSection;
+//    cResumeEvent: THandle;
+//    Function GetSuspended:Boolean;
+//    Procedure SetSuspended(Value:Boolean);
+  protected
+//    cTerminateEvent: THandle;
+  Public
+//    property Suspended: Boolean read GetSuspended write SetSuspended;
+//    constructor Create(CreateSuspended: Boolean);
+    Procedure TerminateAndWaitForFinish;
+    procedure Terminate; virtual; // override; тут, на жаль, не можна override, бо у TThread Terminate не є віртуальною...
+    procedure Suspend;// virtual;  //тут, на жаль, не можна override, бо у TThread Suspend не є віртуальною...
+//    procedure Resume;// virtual;  //тут, на жаль, не можна override, бо у TThread Resume не є віртуальною...
+//    destructor Destroy; override;
+  end;
+
 function FormatOSError(sCommentToError:String; LastError: Integer):SysUtils.EOSError;
 function FormatLastOSError(sCommentToError:String):SysUtils.EOSError;
 procedure RaiseLastOSError(sCommentToError:String); overload;
@@ -178,7 +199,7 @@ Procedure FindFiles(Const sDir, sMask:String;
              // якщо sStrictAttr=False то незалежно від sAttr повертаються і
              // звичайні файли (без атрибутів):
            sStrictAttr:Boolean = False;
-           sLogFile:TLogFile = Nil); platform;
+           sLogFile:TLogFile = Nil);
 
 Function CopyFile(Const sSourceDir, sDestDir,
               sFileName:String; sLogFile:TLogFile = Nil):Boolean; overload;
@@ -708,6 +729,59 @@ Begin
           c_Space, Self.cLogFile);
   End;
 End;
+
+Procedure TAdvancedTerminatedThread.TerminateAndWaitForFinish;
+Begin
+  if Not(Self.Finished) then
+  Begin
+    Self.Terminate;
+    while Self.Suspended do Self.Resume;
+
+    Self.WaitFor;
+  End;
+End;
+procedure TAdvancedTerminatedThread.Terminate;
+Begin
+  Inherited Terminate;
+End;
+
+procedure TAdvancedTerminatedThread.Suspend;
+Const c_EventCount = 2;
+      c_TerminateEventIndex = 0;
+      c_ResumeEventIndex = 1;
+Var cHandleArray: array [0..c_EventCount - 1] of THandle;
+    cSignal:DWord;
+Begin
+  if Not Self.Terminated then Self.Suspend;
+End;
+
+{Function TAdvancedTerminatedThread.GetSuspended:Boolean;
+Begin
+  if Inherited Suspended then Result:= True
+  Else
+  Begin
+
+  End;
+
+End;
+Procedure TAdvancedTerminatedThread.SetSuspended(Value:Boolean);
+Begin
+  if Value then Self.Suspend else Self.Resume;
+End;}
+
+{procedure TAdvancedTerminatedThread.Resume;
+Begin
+  While Inherited Suspended do Inherited Self.Resume;
+
+  ProcSetEvent(Self.cResumeEvent,
+     'Не вдалося встановити сигнал продовження роботи потока... ' +
+       c_SystemSays,
+    Nil);
+
+  //Self.cResumeCalledBeforeSuspend:= Not Self.Suspended;
+  //Inherited Resume;
+End;
+}
 
 //------------------------------------------------------
 Function GetOSVersion(Var dMinor, dMajor, dBuildNumber,

@@ -210,7 +210,14 @@ type
         Destructor Destroy; override;
     end;
 
-    TLogFile = class(TCustomTextFile)
+    TWritingTextFile = class(TCustomTextFile)
+      public
+        Procedure Flush;
+        Procedure Write(Const sText:String; sFinishLine:Boolean = False);
+        Procedure WriteLn(Const sText:String);
+    end;
+
+    TLogFile = class(TWritingTextFile)
     private
       //cFile: System.Text;
       //cFilePath: String;
@@ -937,8 +944,9 @@ end;
 
 function HexToBinString(s: TPortWorkString; sLogFile:TLogFile): TPortWorkString;
 var i: Integer;
-var ss: TPortWorkString;
-var c: TPortWorkChar;
+ ss: TPortWorkString;
+ c: TPortWorkChar;
+ ccWordLength: Integer;
 begin
   s:=Trim(s);  // якщо є зайві пробіли вкінці - відкидаємо
   result:='';
@@ -956,15 +964,23 @@ begin
   for i:=1 to System.Length(s) do begin
     c:=s[i];
     ss:=ss+c;
-    if(c=c_Space) and (ss<>'') then begin
+    if (c=c_Space) then
+    Begin
       ss:=trim(ss);
-      if System.Length(ss)<>2 then
-      Begin
-        sLogFile.WriteMessage('HexToBinString: Ожидаются 2-значные цифры...');
-        Continue;
-      End;
-      result:=result+AnsiChar(HexToByte(ss, sLogFile));
-      ss:='';
+      ccWordLength:= System.Length(ss);
+      if ccWordLength <> 0 then
+      begin
+        if ccWordLength <> 2 then
+        Begin
+          sLogFile.WriteMessage('HexToBinString: Ожидаются 2-значные цифры... Значение не распознано: "'+
+            String(ss)+'"...');
+          ss:='';  // 2017.12.13. Коли щось не розпізнане - відкидаємо... а не ліпимо до нього нові символи сплошняком...
+          Continue;
+        End;
+
+        result:=result+AnsiChar(HexToByte(ss, sLogFile));
+        ss:='';
+      end;
     end;
   end;
   //MessageBox(0, pchar(''+result), '', 0); //это для проверки, потом убрать
@@ -3011,6 +3027,43 @@ Begin
 
     Self.ProcWriteMessage(cMessage);
   End;
+End;
+
+Procedure TWritingTextFile.Flush;
+Begin
+  Self.ProcEnterCriticalSection;
+
+  try
+    if Self.cOpened then
+    Begin
+      System.Flush(Self.cFile);
+    End;
+  finally
+    Self.ProcLeaveCriticalSection;
+  end;
+End;
+
+Procedure TWritingTextFile.Write(Const sText:String; sFinishLine:Boolean = False);
+Begin
+  Self.ProcEnterCriticalSection;
+  try
+    if Not(Self.cOpened) then
+    Begin
+      Raise Exception.Create('Не удалось записать текст в файл "'+
+          Self.cFilePath+'", потому что он не открыт... Сообщение было "'+
+        sText + '".');
+    End;
+
+    if sFinishLine then
+      System.Writeln(Self.cFile, sText)
+    else System.Write(Self.cFile, sText);
+  finally
+    Self.ProcLeaveCriticalSection;
+  end;
+End;
+Procedure TWritingTextFile.WriteLn(Const sText:String);
+Begin
+  Self.Write(sText, True);
 End;
 
 procedure TLogFile.ProcWriteMessage(Const sMessage:String;

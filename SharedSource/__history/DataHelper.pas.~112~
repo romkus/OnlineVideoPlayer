@@ -210,6 +210,13 @@ type
         Destructor Destroy; override;
     end;
 
+    TWritingTextFile = class(TCustomTextFile)
+      public
+        Procedure Flush;
+        Procedure Write(Const sText:String; sFinishLine:Boolean = False);
+        Procedure WriteLn(Const sText:String);
+    end;
+
     TLogFile = class(TCustomTextFile)
     private
       //cFile: System.Text;
@@ -937,26 +944,43 @@ end;
 
 function HexToBinString(s: TPortWorkString; sLogFile:TLogFile): TPortWorkString;
 var i: Integer;
-var ss: TPortWorkString;
-var c: TPortWorkChar;
+ ss: TPortWorkString;
+ c: TPortWorkChar;
+ ccWordLength: Integer;
 begin
   s:=Trim(s);  // якщо є зайві пробіли вкінці - відкидаємо
+  result:='';
+  // 2017.12.13. Якщо передали пустий рядок - то не значить що щось не так...
+  // Просто він дійсно може бути пустим коли нема жодного коду символа.
+  // Тому результуючий рядок буде теж пустим, і повідомляти про помилку
+  // кодування не треба:
+  if System.Length(s) = 0 then
+    Exit;
+
   s:=s+c_Space;    // проте додаємо один в кінець, він потрібен як маркер
 
   ss:='';
-  result:='';
-  for i:=1 to length(s) do begin
+
+  for i:=1 to System.Length(s) do begin
     c:=s[i];
     ss:=ss+c;
-    if(c=c_Space) and (ss<>'') then begin
+    if (c=c_Space) then
+    Begin
       ss:=trim(ss);
-      if length(ss)<>2 then
-      Begin
-        sLogFile.WriteMessage('HexToBinString: Ожидаются 2-значные цифры...');
-        Continue;
-      End;
-      result:=result+AnsiChar(HexToByte(ss, sLogFile));
-      ss:='';
+      ccWordLength:= System.Length(ss);
+      if ccWordLength <> 0 then
+      begin
+        if ccWordLength <> 2 then
+        Begin
+          sLogFile.WriteMessage('HexToBinString: Ожидаются 2-значные цифры... Значение не распознано: "'+
+            String(ss)+'"...');
+          ss:='';  // 2017.12.13. Коли щось не розпізнане - відкидаємо... а не ліпимо до нього нові символи сплошняком...
+          Continue;
+        End;
+
+        result:=result+AnsiChar(HexToByte(ss, sLogFile));
+        ss:='';
+      end;
     end;
   end;
   //MessageBox(0, pchar(''+result), '', 0); //это для проверки, потом убрать
@@ -3005,6 +3029,44 @@ Begin
   End;
 End;
 
+Procedure TWritingTextFile.Flush;
+Begin
+  Self.ProcEnterCriticalSection;
+
+  try
+    if Self.cOpened then
+    Begin
+      System.Flush(Self.cFile);
+    End;
+  finally
+    Self.ProcLeaveCriticalSection;
+  end;
+End;
+
+Procedure TWritingTextFile.Write(Const sText:String; sFinishLine:Boolean = False);
+Begin
+  Self.ProcEnterCriticalSection;
+  try
+    if Not(Self.cOpened) then
+    Begin
+      Raise Exception.Create('Не удалось записать текст в файл "'+
+          Self.cFilePath+'", потому что он не открыт... Сообщение было "'+
+        sText + '".');
+    End;
+
+    if Self.cOpened then
+    Begin
+      System.Flush(Self.cFile);
+    End;
+  finally
+    Self.ProcLeaveCriticalSection;
+  end;
+End;
+Procedure TWritingTextFile.WriteLn(Const sText:String);
+Begin
+
+End;
+
 procedure TLogFile.ProcWriteMessage(Const sMessage:String;
         sFinishLine:Boolean = True);
 Begin
@@ -3328,6 +3390,41 @@ begin
 
   Result := -1;
 end;
+
+function BytesToAnsiString(const sBytes:TIdBytes):AnsiString;
+var ccLength:Integer;
+Begin
+  ccLength:= System.Length(sBytes);
+  SetLength(Result, ccLength);
+  if ccLength > 0 then
+    System.Move(sBytes[0], Result[1], ccLength);
+End;
+function BytesToString(const sBytes:TIdBytes):String;
+var ccLength, ccDoubleByteLength, ccCharLength:Integer;
+Begin
+  ccLength:= System.Length(sBytes);
+  ccCharLength:= SizeOf(System.Char);
+  ccDoubleByteLength:= (ccLength div ccCharLength) + (ccLength mod ccCharLength);
+  SetLength(Result, ccDoubleByteLength);
+  if ccDoubleByteLength > 0 then
+    System.Move(sBytes[0], Result[1], ccLength);
+End;
+function AnsiStringToBytes(const sString:AnsiString):TIdBytes;
+var ccByteCount:Integer;
+Begin
+  ccByteCount:= System.Length(sString);
+  SetLength(Result, ccByteCount);
+  if ccByteCount > 0 then
+    System.Move(sString[1], Result[0], ccByteCount);
+End;
+function StringToBytes(const sString:String):TIdBytes;
+var ccByteCount:Integer;
+Begin
+  ccByteCount:= SysUtils.ByteLength(sString);
+  SetLength(Result, ccByteCount);
+  if ccByteCount > 0 then
+    System.Move(sString[1], Result[0], ccByteCount);
+End;
 
 end.
 

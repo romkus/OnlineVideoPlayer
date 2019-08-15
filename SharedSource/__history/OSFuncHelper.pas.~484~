@@ -1,7 +1,7 @@
 unit OSFuncHelper;
 
 interface
-uses SysUtils, Classes, Windows, SysConst, AnsiStrings, Registry, DataHelper;
+uses SysUtils, Classes, Windows, SysConst, AnsiStrings, Registry, SyncObjs, DataHelper;
 
 const
           c_SystemSays = '—истема каже:';
@@ -91,6 +91,8 @@ const
       MB_AllMessageBoxWndTypeMask = $00FF0000;
       ci_DefOkMsgBoxType = MB_OK or MB_TOPMOST;
 
+      ic_MessageSpeedTimeUnit = 1000;  // 1000 мс.
+
 type
   TNTSTATUS = DWord;
 
@@ -141,6 +143,25 @@ type
       property DLLHandle: THandle read cDLLHandle;
       property DLLName: String read cDllName;
       property LogFile: TLogFile read cLogFile write cLogFile;
+  end;
+
+  TAdvancedTerminatedThread = class(TThread)
+  private
+//    cResumeCalledBeforeSuspend: Boolean;
+    //cSuspendResumeUseSection: TCriticalSection;
+//    cResumeEvent: THandle;
+//    Function GetSuspended:Boolean;
+//    Procedure SetSuspended(Value:Boolean);
+  protected
+//    cTerminateEvent: THandle;
+  Public
+//    property Suspended: Boolean read GetSuspended write SetSuspended;
+//    constructor Create(CreateSuspended: Boolean);
+    Procedure TerminateAndWaitForFinish;
+    procedure Terminate; virtual; // override; тут, на жаль, не можна override, бо у TThread Terminate не Ї в≥ртуальною...
+    procedure Suspend;// virtual;  //тут, на жаль, не можна override, бо у TThread Suspend не Ї в≥ртуальною...
+//    procedure Resume;// virtual;  //тут, на жаль, не можна override, бо у TThread Resume не Ї в≥ртуальною...
+//    destructor Destroy; override;
   end;
 
 function FormatOSError(sCommentToError:String; LastError: Integer):SysUtils.EOSError;
@@ -707,6 +728,31 @@ Begin
           sProcOrFuncName+c_Quotes+c_Dot+c_Space+c_SystemSays+
           c_Space, Self.cLogFile);
   End;
+End;
+
+Procedure TAdvancedTerminatedThread.TerminateAndWaitForFinish;
+Begin
+  if Not(Self.Finished) then
+  Begin
+    Self.Terminate;
+    while Self.Suspended do Self.Resume;
+
+    Self.WaitFor;
+  End;
+End;
+procedure TAdvancedTerminatedThread.Terminate;
+Begin
+  Inherited Terminate;
+End;
+
+procedure TAdvancedTerminatedThread.Suspend;
+Const c_EventCount = 2;
+      c_TerminateEventIndex = 0;
+      c_ResumeEventIndex = 1;
+Var cHandleArray: array [0..c_EventCount - 1] of THandle;
+    cSignal:DWord;
+Begin
+  if Not Self.Terminated then Self.Suspend;
 End;
 
 //------------------------------------------------------

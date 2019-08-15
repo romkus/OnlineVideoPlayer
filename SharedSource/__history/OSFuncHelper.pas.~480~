@@ -1,7 +1,7 @@
 unit OSFuncHelper;
 
 interface
-uses SysUtils, Classes, Windows, SysConst, AnsiStrings, Registry, DataHelper;
+uses SysUtils, Classes, Windows, SysConst, AnsiStrings, Registry, SyncObjs, DataHelper;
 
 const
           c_SystemSays = 'Система каже:';
@@ -84,8 +84,14 @@ const
       cs_RegGetValueProcName =
         {$IFDEF UNICODE}'RegGetValueW'{$ELSE}'RegGetValueA'{$ENDIF};
 
-      const
-        MB_TIMEDOUT = 32000;
+      MB_TIMEDOUT = 32000;
+
+      MB_AllMessageBoxButtonsMask = Windows.MB_TYPEMASK; // $0F;
+      MB_AllMessageBoxIconsMask = Windows.MB_ICONMASK;   // $F0;
+      MB_AllMessageBoxWndTypeMask = $00FF0000;
+      ci_DefOkMsgBoxType = MB_OK or MB_TOPMOST;
+
+      ic_MessageSpeedTimeUnit = 1000;  // 1000 мс.
 
 type
   TNTSTATUS = DWord;
@@ -137,6 +143,25 @@ type
       property DLLHandle: THandle read cDLLHandle;
       property DLLName: String read cDllName;
       property LogFile: TLogFile read cLogFile write cLogFile;
+  end;
+
+  TAdvancedTerminatedThread = class(TThread)
+  private
+//    cResumeCalledBeforeSuspend: Boolean;
+    //cSuspendResumeUseSection: TCriticalSection;
+//    cResumeEvent: THandle;
+//    Function GetSuspended:Boolean;
+//    Procedure SetSuspended(Value:Boolean);
+  protected
+//    cTerminateEvent: THandle;
+  Public
+//    property Suspended: Boolean read GetSuspended write SetSuspended;
+//    constructor Create(CreateSuspended: Boolean);
+    Procedure TerminateAndWaitForFinish;
+    procedure Terminate; virtual; // override; тут, на жаль, не можна override, бо у TThread Terminate не є віртуальною...
+    procedure Suspend;// virtual;  //тут, на жаль, не можна override, бо у TThread Suspend не є віртуальною...
+    procedure Resume;// virtual;  //тут, на жаль, не можна override, бо у TThread Resume не є віртуальною...
+//    destructor Destroy; override;
   end;
 
 function FormatOSError(sCommentToError:String; LastError: Integer):SysUtils.EOSError;
@@ -703,6 +728,120 @@ Begin
           sProcOrFuncName+c_Quotes+c_Dot+c_Space+c_SystemSays+
           c_Space, Self.cLogFile);
   End;
+End;
+
+{constructor TAdvancedTerminatedThread.Create(CreateSuspended: Boolean);
+Begin
+  Inherited Create(True);}
+ { Self.cTerminateEvent:= ProcCreateEvent('Не вдалося створити об''єкт події реагування на команду завершити потік. ' +
+    c_SystemSays,
+    True,   // після виникнення скидається вручну
+    False,  // подія створюється такою що ще не відбувалася
+    Nil,   // подія не має імені (воно не треба, бо інші процеси цю подію не використовують і її важіль не успадковують)
+    Nil);  // об'єкт для передачі повідомлень тут відсутній. Будуть генеруватись виключення з повідомленнями про помилки якщо треба
+  Self.cResumeEvent:= ProcCreateEvent('Не вдалося створити об''єкт події команди продовження роботи потока. ' +
+    c_SystemSays,
+    True,   // після виникнення скидається вручну
+    False,  // подія створюється такою що ще не відбувалася
+    Nil,   // подія не має імені (воно не треба, бо інші процеси цю подію не використовують і її важіль не успадковують)
+    Nil);  // об'єкт для передачі повідомлень тут відсутній. Будуть генеруватись виключення з повідомленнями про помилки якщо треба
+    }
+
+{  if Not(CreateSuspended) then Inherited Self.Resume;
+
+  //Self.cSuspendResumeUseSection:= TCriticalSection.Create;
+//  Self.cResumeCalledBeforeSuspend:= False;
+End;}
+
+{destructor TAdvancedTerminatedThread.Destroy;
+Begin
+  //FreeAndNil(Self.cSuspendResumeUseSection);
+  }
+  {ProcCloseHandle(Self.cTerminateEvent,
+    'Не вдалося закрити об''єкт події реагування на команду завершити потік... ' + c_SystemSays,
+     Nil);
+
+  ProcCloseHandle(Self.cResumeEvent,
+    'Не вдалося закрити об''єкт події команди продовження роботи потока... ' + c_SystemSays,
+     Nil);}
+  {
+  Inherited Destroy;
+End;}
+
+Procedure TAdvancedTerminatedThread.TerminateAndWaitForFinish;
+Begin
+  if Not(Self.Finished) then
+  Begin
+    Self.Terminate;
+    while Self.Suspended do Self.Resume;
+
+    Self.WaitFor;
+  End;
+End;
+procedure TAdvancedTerminatedThread.Terminate;
+Begin
+  Inherited Terminate;
+
+{  ProcSetEvent(Self.cTerminateEvent,
+     'Не вдалося встановити сигнал про те що потоку надійшла команда завершитися... ' +
+       c_SystemSays,
+    Nil); }
+End;
+
+procedure TAdvancedTerminatedThread.Suspend;
+Const c_EventCount = 2;
+      c_TerminateEventIndex = 0;
+      c_ResumeEventIndex = 1;
+Var cHandleArray: array [0..c_EventCount - 1] of THandle;
+    cSignal:DWord;
+Begin
+  if Not Self.Terminated then Self.Suspend;
+  
+
+//  if Not Self.cResumeCalledBeforeSuspend then
+//    Inherited Suspend;
+//  Self.cResumeCalledBeforeSuspend:= False;
+
+  {ProcResetEvent(Self.cResumeEvent, 'Не вдалося вимкнути сигнал продовження роботи потока... ' +
+      c_SystemSays,
+      Nil);
+
+  cHandleArray[c_TerminateEventIndex]:= Self.cTerminateEvent;
+  cHandleArray[c_ResumeEventIndex]:= Self.cResumeEvent;
+         // Очікуємо одну із можливих подій:
+  cSignal:= Windows.WaitForMultipleObjects(c_EventCount, Addr(cHandleArray[0]),
+             False, Windows.INFINITE);
+  case cSignal of
+    Windows.WAIT_FAILED: Windows.Sleep(c_EmergencySleepTime); // якщо очікування не вдається - то принаймні не завантажуємо процесора і очікуємо приходу кращого часу...
+    // else йдемо далі
+  end;}
+End;
+
+{Function TAdvancedTerminatedThread.GetSuspended:Boolean;
+Begin
+  if Inherited Suspended then Result:= True
+  Else
+  Begin
+
+  End;
+
+End;
+Procedure TAdvancedTerminatedThread.SetSuspended(Value:Boolean);
+Begin
+  if Value then Self.Suspend else Self.Resume;
+End;}
+
+procedure TAdvancedTerminatedThread.Resume;
+Begin
+{  While Inherited Suspended do Inherited Self.Resume;
+
+  ProcSetEvent(Self.cResumeEvent,
+     'Не вдалося встановити сигнал продовження роботи потока... ' +
+       c_SystemSays,
+    Nil);}
+
+  //Self.cResumeCalledBeforeSuspend:= Not Self.Suspended;
+  //Inherited Resume;
 End;
 
 //------------------------------------------------------

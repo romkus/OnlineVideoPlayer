@@ -210,7 +210,14 @@ type
         Destructor Destroy; override;
     end;
 
-    TLogFile = class(TCustomTextFile)
+    TWritingTextFile = class(TCustomTextFile)
+      public
+        Procedure Flush;
+        Procedure Write(Const sText:String; sFinishLine:Boolean = False);
+        Procedure WriteLn(Const sText:String);
+    end;
+
+    TLogFile = class(TWritingTextFile)
     private
       //cFile: System.Text;
       //cFilePath: String;
@@ -237,9 +244,6 @@ type
       Procedure SetHideMessageWhenRepeatedMoreThan(Value: Cardinal);
 
       procedure ProcLogRepeating(Const sTimeToWrite:TDateTime);
-
-      procedure ProcWriteMessage(Const sMessage:String;
-        sFinishLine:Boolean = True);
     public
       //property Opened: Boolean read cOpened;
       //property FilePath:String read cFilePath;
@@ -267,35 +271,8 @@ type
 
     TReadingTextFile = class(TCustomTextFile)
     private
-      //cFile: System.Text;
-      //cFilePath: String;
-      //cOpened: Boolean;
 
-      //cFileCriticalSection:SyncObjs.TCriticalSection;
-
-      //cLastLogTime: TDateTime;
-      //cLastLogLine: String;
-
-      //cLineRepeatCount: Cardinal;
-
-      //cMessageRepeatChecking:Boolean;
-      //cHideMessageWhenRepeatedMoreThan:Cardinal;
     protected
-
-      //Procedure ProcEnterCriticalSection;
-      //Procedure ProcLeaveCriticalSection;
-
-      //function GetLastLogLine: String;
-      //function GetLastLogLineNoTimeStamp: String;
-      //function GetLastLogTime: TDateTime;
-
-      //Procedure SetMessageRepeatChecking(Value: Boolean);
-      //Procedure SetHideMessageWhenRepeatedMoreThan(Value: Cardinal);
-
-      //procedure ProcLogRepeating(Const sTimeToWrite:TDateTime);
-
-      //procedure ProcWriteMessage(Const sMessage:String;
-      //  sFinishLine:Boolean = True);
 
       Function ProcReadLine:String;
     public
@@ -313,8 +290,6 @@ type
       Function SeekEOln:Boolean;
 
       Function ReadLine:String;
-      //Procedure Close; override;
-      //Destructor Destroy; override;
     end;
 
   TUIntList = class(Classes.TList)
@@ -937,26 +912,43 @@ end;
 
 function HexToBinString(s: TPortWorkString; sLogFile:TLogFile): TPortWorkString;
 var i: Integer;
-var ss: TPortWorkString;
-var c: TPortWorkChar;
+ ss: TPortWorkString;
+ c: TPortWorkChar;
+ ccWordLength: Integer;
 begin
   s:=Trim(s);  // якщо є зайві пробіли вкінці - відкидаємо
+  result:='';
+  // 2017.12.13. Якщо передали пустий рядок - то не значить що щось не так...
+  // Просто він дійсно може бути пустим коли нема жодного коду символа.
+  // Тому результуючий рядок буде теж пустим, і повідомляти про помилку
+  // кодування не треба:
+  if System.Length(s) = 0 then
+    Exit;
+
   s:=s+c_Space;    // проте додаємо один в кінець, він потрібен як маркер
 
   ss:='';
-  result:='';
-  for i:=1 to length(s) do begin
+
+  for i:=1 to System.Length(s) do begin
     c:=s[i];
     ss:=ss+c;
-    if(c=c_Space) and (ss<>'') then begin
+    if (c=c_Space) then
+    Begin
       ss:=trim(ss);
-      if length(ss)<>2 then
-      Begin
-        sLogFile.WriteMessage('HexToBinString: Ожидаются 2-значные цифры...');
-        Continue;
-      End;
-      result:=result+AnsiChar(HexToByte(ss, sLogFile));
-      ss:='';
+      ccWordLength:= System.Length(ss);
+      if ccWordLength <> 0 then
+      begin
+        if ccWordLength <> 2 then
+        Begin
+          sLogFile.WriteMessage('HexToBinString: Ожидаются 2-значные цифры... Значение не распознано: "'+
+            String(ss)+'"...');
+          ss:='';  // 2017.12.13. Коли щось не розпізнане - відкидаємо... а не ліпимо до нього нові символи сплошняком...
+          Continue;
+        End;
+
+        result:=result+AnsiChar(HexToByte(ss, sLogFile));
+        ss:='';
+      end;
     end;
   end;
   //MessageBox(0, pchar(''+result), '', 0); //это для проверки, потом убрать
@@ -3001,11 +2993,48 @@ Begin
       SysUtils.DateTimeToStr(Self.cLastLogTime)+': "'+
       Self.cLastLogLine+'"...', sTimeToWrite);
 
-    Self.ProcWriteMessage(cMessage);
+    Self.WriteLn(cMessage);
   End;
 End;
 
-procedure TLogFile.ProcWriteMessage(Const sMessage:String;
+Procedure TWritingTextFile.Flush;
+Begin
+  Self.ProcEnterCriticalSection;
+
+  try
+    if Self.cOpened then
+    Begin
+      System.Flush(Self.cFile);
+    End;
+  finally
+    Self.ProcLeaveCriticalSection;
+  end;
+End;
+
+Procedure TWritingTextFile.Write(Const sText:String; sFinishLine:Boolean = False);
+Begin
+  Self.ProcEnterCriticalSection;
+  try
+    if Not(Self.cOpened) then
+    Begin
+      Raise Exception.Create('Не удалось записать текст в файл "'+
+          Self.cFilePath+'", потому что он не открыт... Сообщение было "'+
+        sText + '".');
+    End;
+
+    if sFinishLine then
+      System.Writeln(Self.cFile, sText)
+    else System.Write(Self.cFile, sText);
+  finally
+    Self.ProcLeaveCriticalSection;
+  end;
+End;
+Procedure TWritingTextFile.WriteLn(Const sText:String);
+Begin
+  Self.Write(sText, True);
+End;
+
+{procedure TLogFile.ProcWriteMessage(Const sMessage:String;
         sFinishLine:Boolean = True);
 Begin
     // Критичну секцію тут не чіпаємо, це приватна процедура і в секцію мали вже зайти...
@@ -3019,7 +3048,7 @@ Begin
   if sFinishLine then
     System.Writeln(Self.cFile, sMessage)
   else System.Write(Self.cFile, sMessage);
-End;
+End;}
 
 Function TReadingTextFile.ProcReadLine:String;
 Begin
@@ -3081,7 +3110,7 @@ Begin
         cMessage:= AddTimeStampToMessage(sMessage, cTime)
       Else cMessage:= sMessage;
 
-      Self.ProcWriteMessage(cMessage, sFinishLine);
+      Self.Write(cMessage, sFinishLine);
     End;
   finally
     Self.ProcLeaveCriticalSection;

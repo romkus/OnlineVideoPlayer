@@ -20,6 +20,7 @@
 			<Base>true</Base>
 		</PropertyGroup>
 		<PropertyGroup Condition="'$(Base)'!=''">
+			<BRCC_IncludePath>c:\Program Files (x86)\CodeGear\RAD Studio\6.0\source\JediHeaders;$(BRCC_IncludePath)</BRCC_IncludePath>
 			<DCC_RemoteDebug>true</DCC_RemoteDebug>
 			<DCC_DebugDCUs>true</DCC_DebugDCUs>
 			<DCC_RangeChecking>true</DCC_RangeChecking>
@@ -108,7 +109,6 @@
 						<VersionInfoKeys Name="Comments"/>
 					</VersionInfoKeys>
 					<Excluded_Packages>
-						<Excluded_Packages Name="C:\Documents and Settings\All Users\Документы\RAD Studio\6.0\Bpl\tmsded2009.bpl">TMS Component Pack design time support</Excluded_Packages>
 						<Excluded_Packages Name="$(BDS)\bin\bcboffice2k120.bpl">CodeGear C++Builder Office 2000 Servers Package</Excluded_Packages>
 						<Excluded_Packages Name="$(BDS)\bin\bcbofficexp120.bpl">CodeGear C++Builder Office XP Servers Package</Excluded_Packages>
 						<Excluded_Packages Name="$(BDS)\bin\dcloffice2k120.bpl">Microsoft Office 2000 Sample Automation Server Wrapper Components</Excluded_Packages>

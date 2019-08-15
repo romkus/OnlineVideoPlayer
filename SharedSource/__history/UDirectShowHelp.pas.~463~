@@ -5,7 +5,7 @@ interface
   // бо однойменний модуль DSUtil вже є у пакеті "database" (в Delphi 9)...
 Uses SysUtils, SysConst, Windows, ShLwApi, Classes, Jpeg, SyncObjs, ComObj, StrUtils,
      ActiveX, DirectShow9, DShowUtil, Graphics,
-      DataHelper, OSFuncHelper, UEventHelper;
+      DataHelper, OSFuncHelper; //, UEventHelper
 
 type
   TBMPSampleRec = record
@@ -53,6 +53,7 @@ Const cs_NewLine = Chr(13)+Chr(10);
   cs_FailedToCloseEvent = ': не вдалося закрити об''єкт очікування ';
 
   cs_AboutThreadStopCommand = ' команди завершення потока... ';
+  cs_AboutWaitResetCommand = ' команди перезапуску очікування... ';
   cs_AboutSampleCapturedEvent = ' події отримання кадра... ';
   cs_AboutNewSampleCaptured = ' про те що захоплено новий кадр... ';
 
@@ -63,46 +64,60 @@ Const cs_NewLine = Chr(13)+Chr(10);
 
   cs_SeekingInterfaceNotAssigned = ': інтерфейс перемотки не заданий...';
 
+  // 80004005 = "Неопознанная ошибка"... але саме її показує коли нема
+  // можливості читати позиції відео...:
+  ci_NotWindableError = $80004005;
+
   c_SamplesInfinite = High(Cardinal);
 
   c_DefJpegCompressionQuality = 50; //30;
   cs_JpegExt = 'jpg';
 
+  //c_WaitTimeOut = Windows.INFINITE;
+  ci_WaitTimeOut = 180000; // 3 хвилини
+
 type
   PAMMPEGSystemType = ^TAMMPEGSystemType;
 
   TProcDShowEvent = Procedure (cEvCode:Longint; lParam1, lParam2:Longint) of object;
-  TCallFromThreadMethod = Procedure (sCaller: TThread) of object;
+  TCallFromThreadMethod = Procedure (sCaller: TAdvancedTerminatedThread) of object;
 
-  TCallFromThreadOnGraphEvent = Procedure (sCaller: TThread;
+  TCallFromThreadOnGraphEvent = Procedure (sCaller: TAdvancedTerminatedThread;
     sEvCode:Longint; slParam1, slParam2:Longint;
     sEventName, sEventData:String) of object;
 
-  TCallFromThreadOnStateChange = Procedure (sCaller: TThread;
+  TCallFromThreadOnStateChange = Procedure (sCaller: TAdvancedTerminatedThread;
     Const sState, sLastState:TFilterState;
     sSTATE_INTERMEDIATE, sCANT_CUE:Boolean;
     sStateRes, sLastStateRes:HResult;
     sCurURL, sLastURL, sCurName_ch:String) of object;
 
-  TCallFromThreadOnLogMessage = Procedure (sCaller: TThread;
+  TCallFromThreadOnLogMessage = Procedure (sCaller: TAdvancedTerminatedThread;
         Const sMessage:String;
         sThisIsCriticalError:Boolean = False) of object;
 
-  TMessageLogProc = Procedure (sCurThread:TThread;
+  TMessageLogProc = Procedure (sCurThread:TAdvancedTerminatedThread;
         Const sMessage:String;
         sThisIsCriticalError:Boolean = False) of object;
 
-  TCallFromThreadOnSample = Procedure (sCaller: TThread;
+  TCallFromThreadOnSample = Procedure (sCaller: TAdvancedTerminatedThread;
     sSample:PBMPSampleRec) of object;
 
-  TCallFromThreadOnSampleAsBitmap = Procedure (sCaller: TThread;
+  TCallFromThreadOnSampleAsBitmap = Procedure (sCaller: TAdvancedTerminatedThread;
     sSample:Graphics.TBitmap) of object;
 
-  TCallFromThreadOnSampleAsJpeg = Procedure (sCaller: TThread;
+  TCallFromThreadOnSampleAsJpeg = Procedure (sCaller: TAdvancedTerminatedThread;
     sSample:TJpegImage) of object;
 
-  TCallFromThreadOnSampleAsFile = Procedure (sCaller: TThread;
+  TCallFromThreadOnSampleAsFile = Procedure (sCaller: TAdvancedTerminatedThread;
     sFilePath: String) of object;
+
+  TCallFromThreadOnPositionGot = Procedure (sCaller: TAdvancedTerminatedThread;
+    sCurPosition, sStopPosition:int64;
+    Const sTimeFormat:TGUID) of object;
+  TCallFromThreadOnAvailablePositionsGot = Procedure (sCaller: TAdvancedTerminatedThread;
+    sEarliestPosition, sLatestPosition:int64;
+    Const sTimeFormat:TGUID) of object;
 
   //TCallFromThreadOnSampleCB = function (
   //    SampleTime: Double; pSample: IMediaSample): HResult;
@@ -197,16 +212,16 @@ type
 
   TDirectShowGraphController = class;
 
-  TDirectShowGraphEventHandler = class(TThread)
+  TDirectShowGraphEventHandler = class(TAdvancedTerminatedThread)
     private
       cMediaEvent: IMediaEventEx;
     protected
       cGraphController:TDirectShowGraphController;
-      cTerminateEvent, cGraphEvent: THandle;
+      cTerminateEvent, cGraphEvent, cWaitResetEvent: THandle;
 
       cOnGraphEvent: TCallFromThreadOnGraphEvent;
 
-      cMediaEventUseSection:TCriticalSection;
+//      cMediaEventUseSection:TCriticalSection;
 
          //Інтерфейси DirectShow:
       property fMediaEvent: IMediaEventEx read cMediaEvent;
@@ -220,6 +235,7 @@ type
 
       Procedure DShowEventParamHandler(cEvCode:Longint;
         lParam1, lParam2:Longint);
+      Procedure ResetWaitingForEvent;
     public
       property OnGraphEvent:TCallFromThreadOnGraphEvent read cOnGraphEvent write SetOnGraphEvent;
 
@@ -230,12 +246,12 @@ type
       //новий слухач подій і налаштувати його.
       //Procedure ChangeGraph(sGraphBuilder:IGraphBuilder);
       destructor Destroy; override;
-      procedure Terminate; virtual;
+      procedure Terminate; override;
   end;
 
    // Базовий клас потока для керування читанням і перетворенням
    // відео і/або аудіо:
-  TDirectShowGraphController = class(TThread)
+  TDirectShowGraphController = class(TAdvancedTerminatedThread)
     private
         // Інтерфейси DirectShow:
       cGraphBuilder: IGraphBuilder;
@@ -244,6 +260,8 @@ type
         // Інтерфейс для перемотування позиції відтворення:
       cMediaSeeking: IMediaSeeking;
       //cVideoWindow: IVideoWindow;
+
+      cGraphWaitTimeOut: DWord;
 
     protected
       //cTerminateEvent: THandle;
@@ -255,6 +273,8 @@ type
 
       cOnGraphEvent: TCallFromThreadOnGraphEvent;
       cOnLogMessage: TCallFromThreadOnLogMessage;
+      cOnPositionGot: TCallFromThreadOnPositionGot;
+      cOnAvailablePositionsGot: TCallFromThreadOnAvailablePositionsGot;
 
       // write SetOnLogMessage;
 
@@ -271,8 +291,10 @@ type
       cLastURL:String;
         // Запит на перемотку:
       cNewPositionQueried:Boolean;
+        // Запити на отримання поточної позиції і кінцевих позицій відтворення:
+      cReadCurPositionQueried, cReadAvailPositionsQueried:Boolean;
         // Позиція відтворення, до якої треба перемотати:
-      cDestPosition:Int64; cDestPositionIsRelative:Boolean;
+      cDestPosition:Int64; cDestPositionIsRelative, cSeekToKeyFrame:Boolean;
         //   cTimeFormat - формат позиції відтворення медіафайла.
         //   При його зміні граф зупиняється (і запускається заново з
         // відтворенням із початку).
@@ -297,6 +319,9 @@ type
         // Викликаються із потока цього об'єкта:
       cAfterStop, cAfterPause, cAfterRun:
         TCallFromThreadOnStateChange;
+
+      procedure SetURL(Value:String);
+      procedure SetChName(Value:String);
 
       Function GetBitmapHeaderFromMEDIA_TYPEStruct(Const sMediaType:TAMMediaType;
         var dBMIInfo: TBitmapInfoHeader;
@@ -337,12 +362,18 @@ type
       //Function GetOnGraphEvent: TCallFromThreadOnGraphEvent; virtual;
 
       Procedure SetOnStateChange(Value: TCallFromThreadOnStateChange); // virtual;
+
+      Procedure SetOnPositionGot(Value: TCallFromThreadOnPositionGot);
+      Procedure SetOnAvailablePositionsGot(Value: TCallFromThreadOnAvailablePositionsGot);
+
         // Будувач графа фільтрів. Реалізується в класах-нащадках.
         // Будує граф, але не запускає його. Виконується в потоці цього об'єкта.
         // Повертає ознаку успішності побудови графа
         // (коли файл або потік відкритий, всі потрібні фільтри для читання і
         // відтворення медіа у потрібному форматі знайдені і приєднані в граф):
       Function CreateGraph(Const sUrl, sName_ch:String):Boolean; virtual; abstract;
+        // 2019.03.25: Звільнення графа:
+      Function ClearGraph:Boolean; virtual; abstract;
 
         // Запускає граф на відтворення або на паузу.
       Function RunGraph(sStartPaused:Boolean = False):Boolean; virtual;
@@ -351,7 +382,7 @@ type
         // LogMessage
         // Може викликатися із різних потоків. Треба вказувати об'єкт поточного
         // потока у sCurThread.
-      Procedure LogMessage(sCurThread:TThread;
+      Procedure LogMessage(sCurThread:TAdvancedTerminatedThread;
         Const sMessage:String;
         sThisIsCriticalError:Boolean = False);
 
@@ -361,7 +392,7 @@ type
          // і після кожного такта керування графом. Також в OnStateChange
          // передається адреса потока і його назва, який зараз відтворюється,
          // або відтворювався останнього разу (sCurURL, sCurName_ch):
-      Function GetRunningState(sCurThread:TThread;
+      Function GetRunningState(sCurThread:TAdvancedTerminatedThread;
           Var dSTATE_INTERMEDIATE:Boolean;
           Var dCANT_CUE:Boolean;
           Var dStateRes:HResult;
@@ -373,9 +404,10 @@ type
         sForceRebuildGraph:Boolean; sNewState:TFilterState):Boolean;
 
       Function QueryNewPos(Const sPosition:Int64;
-          sPositionIsRelativeToCurrent:Boolean):Boolean;
+          sPositionIsRelativeToCurrent, sSeekToKeyFrame:Boolean):Boolean;
 
       procedure QueryTimeFormat(Value:TGUID);
+      procedure SetGraphWaitTimeOut(Value: DWord);
         //   Читає одиницю часу графа і записує її cTimeFormat.
         // Граф має існувати:
       Function ReadGraphTimeFormat: TGUID;
@@ -393,7 +425,11 @@ type
         // відтворення. Позиція задається в одиницях часу графа
         // (копія поточного типу одиниці графа зберігається у cTimeFormat):
       Function SetPosition(Const sPosition:Int64;
-        sPositionIsRelativeToCur:Boolean):Boolean;
+        sPositionIsRelativeToCur, sSeekToKeyFrame:Boolean):Boolean;
+      Function GetPosition(sCaller: TAdvancedTerminatedThread; Var dPosition, dStopPosition:Int64):Boolean;
+      Function GetAvailPositions(sCaller: TAdvancedTerminatedThread; Var dEarliest, dLatest:Int64):Boolean;
+      Function CallBackAboutPosition(sCaller: TAdvancedTerminatedThread):Boolean;
+      Function CallBackAboutAvailPositions(sCaller: TAdvancedTerminatedThread):Boolean;
 
       procedure Execute; override; // abstract;
     public
@@ -419,6 +455,10 @@ type
         // відтворення, і при кожній події графа (разом із OnGraphEvent),
         // якщо параметри стану графа або Url змінилися:
       property OnStateChange:TCallFromThreadOnStateChange read cOnStateChange write SetOnStateChange;
+      property OnPositionGot:TCallFromThreadOnPositionGot read cOnPositionGot
+        write SetOnPositionGot;
+      property OnAvailablePositionsGot: TCallFromThreadOnAvailablePositionsGot
+        read cOnAvailablePositionsGot write SetOnAvailablePositionsGot;
 
       Property LogFile:TLogFile read cLogFile;
 
@@ -428,6 +468,24 @@ type
         //   Типова визначається графом при його створенні,
         // зазвичай вона є TIME_FORMAT_MEDIA_TIME (тобто сотні наносекунд):
       property TimeFormat:TGUID read GetCurTimeFormat write QueryTimeFormat;
+        //   Таймаут очікування операцій у графі, мс:
+      property GraphWaitTimeOut: DWord read cGraphWaitTimeOut write
+        SetGraphWaitTimeOut;
+
+        //   Адреса та підпис для потока відтворення.
+        // Тут їх можна читати і змінювати теж,
+        // (а можна передавати при виклику Play і Pause).
+        // Якщо граф уже в стані відтворення чи паузи то зміна URL
+        // веде до перебудови графа і запуску нового потока в тому ж стані
+        // (в русі чи на паузі):
+      property Url:String read cDestUrl write SetURL;
+      property ChannelName: String read cDestChName write SetChName;
+
+        //  Стан відтворення (Run, Pause, Stop), який виставлений як мета у
+        // графа на даний момент. Сам граф може не бути в цьому стані,
+        // але потоки керування ним намагаються привести його до цього заданого.
+        // Задається стан функціями Play, Pause, і процедурою Stop:
+      property DestState: TFilterState read cDestState;
 
         //   Play і Pause повертають False, якщо Url не задано і не було задано
         // з часу створення об'єкта. Для відтворення треба задати Url
@@ -443,6 +501,14 @@ type
       Function Pause(Const Url:String = ''; Const Name_ch:String = '';
         sForceRebuildGraph:Boolean = False):Boolean; virtual;
       procedure Stop; virtual;
+        //   QueryAvailablePositions запускає читання позначок часу в першій
+        // і останній позиції відео (якщо відео не потокове то вони визначені).
+        // Результат повертається у виклику OnAvailablePositionsGot:
+      Procedure QueryAvailablePositions; virtual;
+        //   QueryPosition запускає читання позначки часу поточної
+        // позиції відео і позиції наступної зупинки.
+        // Результат повертається у виклику OnPositionGot:
+      Procedure QueryPosition; virtual;
          //   Переводить стан відтворення на початок файла чи потока,
          // коли це можливо. Якщо не можливо то перебудовує граф
          // і якщо йшло відтворення то запускає його, інакше переводить
@@ -452,7 +518,7 @@ type
          // Позиція має вказуватися в одиницях часу, що вказані у
          // TimeFormat:
       Procedure RewindToPos(sPosition:Int64;
-        sRelativeToCurrent:Boolean = False); Virtual;
+        sRelativeToCurrent:Boolean = False; sToKeyFrame:Boolean = False); Virtual;
 
          // Тут метод SetupVideoWindow тільки запам'ятовує вікно
          // і координати для відеокартинки в ньому, і записує їх у
@@ -476,12 +542,12 @@ type
       constructor Create(sLogFile:TLogFile = Nil;
         CreateSuspended:Boolean = False);
       destructor Destroy; override;
-      procedure Terminate; virtual; // override; тут, на жаль, не можна override, бо у TThread Terminate не є віртуальною...
+      procedure Terminate; override;
   end;
 
   TPlayVideoGraphController = class;
 
-  TProcVideoGraphControllerQueryThread = class (TThread)
+  TProcVideoGraphControllerQueryThread = class (TAdvancedTerminatedThread)
     private
       cGraphController:TPlayVideoGraphController;
     protected
@@ -490,7 +556,7 @@ type
       constructor Create(sGraphController:TPlayVideoGraphController = Nil;
         CreateSuspended:Boolean = False);
       destructor Destroy; override;
-      procedure Terminate; virtual; // override; тут, на жаль, не можна override, бо у TThread Terminate не є віртуальною...
+      procedure Terminate; override;
   end;
 
   TPlayVideoGraphController = class(TDirectShowGraphController)
@@ -532,6 +598,8 @@ type
 
         // Реалізація побудови графа:
       Function CreateGraph(Const sUrl, sName_ch:String):Boolean; override;
+        // 2019.03.25: Реалізація звільнення графа:
+      Function ClearGraph:Boolean; override;
 
         // Запускає граф на відтворення або на паузу.
         // Налаштовує відеовікно, якщо його параметри були задані
@@ -690,7 +758,7 @@ type
 
     //   TSampleGrabberCapturer отримує кадри відео і записує їх у свій
     // буфер-список. Викликає обробники кадрів зі свого потока.
-  TSampleGrabberCapturer = class(TThread)
+  TSampleGrabberCapturer = class(TAdvancedTerminatedThread)
     private
       cSampleObtainer: ISampleGrabberSampleObtainer;
       cSampleQueriedCount: Cardinal;
@@ -706,12 +774,17 @@ type
       cTerminateEvent, cSampleCapturedEvent: THandle;
 
       cCurMediaType: PAMMediaType;
+      cLastSampleAcceptedTick, cLastSecondStart: Cardinal;
+      cLastSecondSamplesReceivedCount:Integer;
+
+      cMaxSampleReceiveCountPerSecond: Integer;
 
       Function ProcGetCurMediaType:PAMMediaType;
       Procedure ProcChangeCurMediaType(sNewMediaType:PAMMediaType);
       Procedure ProcDeleteCurMediaType;
 
       Procedure SetOnSample(Value:TCallFromThreadOnSample);
+      Procedure SetMaxSampleReceiveCountPerSecond(Value:Integer);
     protected
       property SampleGrabber:ISampleGrabber read cSampleGrabber;
 
@@ -725,6 +798,9 @@ type
       function  SampleCB(SampleTime: Double; pSample: IMediaSample): HResult;
         // BufferCB не реалізований, повертає E_NOTIMPL:
       function  BufferCB(SampleTime: Double; pBuffer: PByte; BufferLen: longint): HResult;
+
+      Function CheckSampleAccepted:Boolean;
+
           //   Налаштування SampleGrabber реалізується у класі-нащадку
           // із конкретним типом даних у відеокадрах:
       function InitSampleGrabber:ISampleGrabber; virtual; abstract;
@@ -749,6 +825,17 @@ type
         // звільняються автоматично.
       property OnSample:TCallFromThreadOnSample read cOnSample write
         SetOnSample;
+        //  При MaxSampleReceiveCountPerSecond > 0 об'єкт не захоплює більше
+        // MaxSampleReceiveCountPerSecond кількості кадрів за одну секунду.
+        // Це можна використовувати коли замовлено отримати більше одного кадра,
+        // проте не потрібнен неперервний потік кадрів. Наразі кадри вибираються
+        // послідовно без пропусків при MaxSampleReceiveCountPerSecond = 0, і
+        // лише перші MaxSampleReceiveCountPerSecond щосекунди при
+        // MaxSampleReceiveCountPerSecond > 0. Захоплення НЕ розподіляється
+        // рівномірно по секунді наразі, захоплюються перші кадри щосекунди:
+      property MaxSampleReceiveCountPerSecond: Integer
+        read cMaxSampleReceiveCountPerSecond
+        write SetMaxSampleReceiveCountPerSecond;
          //   CaptureSamples дає запит на отримання кадрів із вказуванням їх
          // кількості. Задана кількість додається до лічильника запитаних кадрів.
          // Кадри захоплюються по можливості послідовно, доки лічильник
@@ -762,9 +849,10 @@ type
       procedure StopCaptureSamples;
 
       constructor Create(sGraphController:TPlayVideoGraphController = Nil;
-        CreateSuspended:Boolean = False);
+        CreateSuspended:Boolean = False;
+        sMaxSampleReceiveCountPerSecond:Integer = 0);
       destructor Destroy; override;
-      procedure Terminate; virtual;
+      procedure Terminate; override;
   end;
 
   TSampleGrabberRGB24BMPCapturer = class(TSampleGrabberCapturer)
@@ -781,17 +869,22 @@ type
       cOnSample: TCallFromThreadOnSample;
 
       cSampleQueriedCount: Cardinal;
+      cMaxSampleReceiveCountPerSecond: Integer;
 
       Procedure SetRenderSamples(Value:Boolean);
       Procedure SetOnSample(Value:TCallFromThreadOnSample);
       Procedure SetSampleGrabberCapturer(Value:TSampleGrabberCapturer);
+      Procedure SetMaxSampleReceiveCountPerSecond(Value: Integer);
 
-      Procedure ProcAfterStop(sCaller: TThread;
+      Procedure ProcAfterStop(sCaller: TAdvancedTerminatedThread;
         Const sState, sLastState:TFilterState;
         sSTATE_INTERMEDIATE, sCANT_CUE:Boolean;
         sStateRes, sLastStateRes:HResult;
          sCurURL, sLastURL, sCurName_ch:String);
     protected
+        // Секція доступа до даних захоплювача кадрів:
+      cSampleGrabberCapturerUseSection:TCriticalSection;
+
       property SampleGrabberCapturer: TSampleGrabberCapturer read
         cSampleGrabberCapturer write SetSampleGrabberCapturer;
 
@@ -819,6 +912,9 @@ type
       property OnSample:TCallFromThreadOnSample read cOnSample write
         SetOnSample;
 
+      property MaxSampleReceiveCountPerSecond: Integer read
+        cMaxSampleReceiveCountPerSecond write SetMaxSampleReceiveCountPerSecond;
+
          //   CaptureSamples дає запит на отримання кадрів із вказуванням їх
          // кількості. Задана кількість додається до лічильника запитаних кадрів.
          // Кадри захоплюються по можливості послідовно, доки лічильник
@@ -841,7 +937,7 @@ type
     private
       cOnSampleAsBitmap: TCallFromThreadOnSampleAsBitmap;
 
-      Procedure ProcOnSample(sCaller: TThread;
+      Procedure ProcOnSample(sCaller: TAdvancedTerminatedThread;
         sSample:PBMPSampleRec);
 
       Procedure SetOnSampleAsBitmap(Value: TCallFromThreadOnSampleAsBitmap);
@@ -857,7 +953,7 @@ type
       cOnSampleAsJpeg: TCallFromThreadOnSampleAsJpeg;
       cCompressionQuality: TJpegQualityRange;
 
-      Procedure ProcOnSample(sCaller: TThread;
+      Procedure ProcOnSample(sCaller: TAdvancedTerminatedThread;
         sSample:Graphics.TBitmap);
 
       Procedure SetOnSampleAsJpeg(Value: TCallFromThreadOnSampleAsJpeg);
@@ -876,7 +972,7 @@ type
       cFileDir, cFileNameStart, cFileExt:String;
       cCounter: Cardinal;
 
-      Procedure ProcOnSample(sCaller: TThread; sSample:TJpegImage);
+      Procedure ProcOnSample(sCaller: TAdvancedTerminatedThread; sSample:TJpegImage);
 
       Procedure SetOnSampleAsJpegFile(Value: TCallFromThreadOnSampleAsFile);
     public
@@ -889,18 +985,6 @@ type
 
   // Читання опису результата функції DirectShow:
 Function HResultToStr(Const sCommentToError:String; sResult:HResult):String;
-
-{Перенесено в модуль UEventHelper:
-// Управління об'єктами подій (Windows.CreateEvent):
-Function ProcCreateEvent(Const sMessageOnError:String;
-   bManualReset: Windows.BOOL = True; bInitialState: Windows.BOOL = True;
-   lpName: PWideChar = Nil; sLogFile:TLogFile = Nil):Windows.THandle;
-Function ProcSetEvent(sEvent:THandle; Const sMessageOnError:String;
-      sLogFile:TLogFile = Nil):Boolean;
-function ProcResetEvent(sEvent:THandle; Const sMessageOnError:String;
-      sLogFile:TLogFile = Nil):Boolean;
-Procedure ProcCloseHandle(Var sHandle:THandle; Const sMessageOnError:String;
-  sLogFile:TLogFile = Nil);}
 
 Function GetFilterInfo(sIBaseFilter:IBaseFilter):TFilterInfo; overload;
 
@@ -961,7 +1045,7 @@ Function GetDVD_WARNINGStr(Const sDVD_WARNING:DVD_WARNING;
 Function ProcDShowEvent(sIMediaEvent:IMediaEvent;
            sHandler: TProcDShowEvent;
            sMessageLogProc:TMessageLogProc = Nil;
-           sCurThread:TThread = Nil):Boolean;
+           sCurThread:TAdvancedTerminatedThread = Nil):Boolean;
 
   // Процедури для отримання описів параметрів подій DirectShow:
 Function GetDShowEventExplanation(Event, Param1, Param2: Integer;
@@ -1002,11 +1086,18 @@ Begin
        Self.cGraphController.LogFile);  // об'єкт для передачі повідомлень
 
   Self.cGraphEvent:= 0;  // об'єкт подій графа створюється інтерфейсом графа
+  Self.cWaitResetEvent:= ProcCreateEvent(cs_ProcName +
+        cs_FailedToCreateEvent + cs_AboutWaitResetCommand +
+        c_SystemSays,
+       True,   // після виникнення скидається вручну (у цій програмі). Можна автоматом, яле тоді система сама скине якщо це було в іншому потоці і той інший завершився вже.
+       False,   // подія створюється такою що ще не відбулася.
+       Nil,   // подія не має імені (воно не треба, бо інші процеси цю подію не використовують і її важіль не успадковують)
+       Self.cGraphController.LogFile);  // об'єкт для передачі повідомлень
   Self.cOnGraphEvent:= Nil;
 
   Self.cMediaEvent:= Nil;
-    // Секція роботи із інтерфейсом подій графа:
-  cMediaEventUseSection:= TCriticalSection.Create;
+//    // Секція роботи із інтерфейсом подій графа:
+//  cMediaEventUseSection:= TCriticalSection.Create;
     // Слухаємо події графа, якщо він заданий:
   Self.InitDSMessageHandler(sGraphBuilder);
   //Self.ChangeGraph(sGraphBuilder);
@@ -1028,8 +1119,8 @@ Begin
 
   ProcCloseHandle(Self.cTerminateEvent,
      cs_ProcName +
-      ': не вдалося закрити об''єкт події закриття потока читання подій графа... ' +
-       c_SystemSays,
+        cs_FailedToCloseEvent + cs_AboutThreadStopCommand +
+        c_SystemSays,
      Self.cGraphController.LogFile);
 
   Self.cMediaEvent:= Nil;
@@ -1037,7 +1128,14 @@ Begin
   Self.cOnGraphEvent:= Nil;
   Self.cGraphEvent:= 0;
 
-  SysUtils.FreeAndNil(Self.cMediaEventUseSection);
+  ProcCloseHandle(Self.cWaitResetEvent,
+     cs_ProcName +
+        cs_FailedToCloseEvent + cs_AboutWaitResetCommand +
+        c_SystemSays,
+     Self.cGraphController.LogFile);
+
+
+//  SysUtils.FreeAndNil(Self.cMediaEventUseSection);
 
   Self.cGraphController:= Nil;
 
@@ -1159,17 +1257,26 @@ Begin
     Self.cOnGraphEvent:= Value;
 End;
 
+Procedure TDirectShowGraphEventHandler.ResetWaitingForEvent;
+Const cs_ProcName = 'TDirectShowGraphEventHandler.ResetWaitingForEvent';
+Begin
+  ProcSetEvent(Self.cWaitResetEvent, cs_ProcName +
+        cs_FailedToSetEvent+cs_AboutWaitResetCommand+
+          c_SystemSays,
+       Self.cGraphController.LogFile);
+End;
+
 procedure TDirectShowGraphEventHandler.Execute;
 Const cs_ProcName = 'Потік TDirectShowGraphEventHandler.Execute';
-  c_EventCount = 2;
+  c_EventCount = 3;
   c_GraphEventIndex = 0;
   c_TerminateCommandIndex = 1;
-  //c_WaitTimeOut = Windows.INFINITE;
-  c_WaitTimeOut = 180000; // 3 хвилини
+  c_WaitResetCommandIndex = 2;
 Var
    cHandleArray: array [0..c_EventCount - 1] of THandle;
    cSignal:DWord;
    cInitRes: HResult;
+   c_WaitTimeOut: DWord;
 Begin
 
   try
@@ -1198,9 +1305,12 @@ Begin
         Continue;
       End;
 
+      c_WaitTimeOut:= Self.cGraphController.GraphWaitTimeOut;
+
          // Масив подій, на які треба очікувати:
       cHandleArray[c_GraphEventIndex]:= Self.cGraphEvent; // події графа
       cHandleArray[c_TerminateCommandIndex]:= Self.cTerminateEvent; // подія команди завершення потока
+      cHandleArray[c_WaitResetCommandIndex]:= Self.cWaitResetEvent; // 2019.03.25: подія команди перезапуску очікування події чи таймаута
 
         // Очікуємо одну із можливих подій:
       cSignal:= Windows.WaitForMultipleObjects(c_EventCount,
@@ -1230,6 +1340,14 @@ Begin
           //Self.DShowEventParamHandler();
         End;
         Windows.WAIT_OBJECT_0 + c_TerminateCommandIndex:;
+        Windows.WAIT_OBJECT_0 + c_WaitResetCommandIndex:
+        Begin
+          ProcResetEvent(Self.cWaitResetEvent,
+                cs_ProcName +
+                cs_FailedToResetEvent+cs_AboutWaitResetCommand+
+                c_SystemSays,
+                Self.cGraphController.LogFile);
+        End;
         Windows.WAIT_TIMEOUT:
         Begin
           if Self.cGraphController.cLastStateRes = VFW_S_STATE_INTERMEDIATE then
@@ -1242,7 +1360,28 @@ Begin
               ' мс у перехідному стані. Можливо граф завис... Буде перезапущений...');
             Self.cGraphController.QueryNewState('','', True,
               Self.cGraphController.cDestState);
+          End
+          //2019.03.25: Network videoflows may need to be stopped also.
+          //When graph is in State_Stopped it's videoflow can still transmit
+          //data over network. To reduce videoserver and network load
+          //videograph has to be freed to stop videoflow:
+          else if (Self.cGraphController.cLastState = State_Stopped)
+            and (Self.cGraphController.cDestState = State_Stopped)
+            and (Not Self.cGraphController.cDestUrlIsLocal) then
+          Begin
+            Self.cGraphController.LogMessage(Self,
+              cs_ProcName +
+              ': у графі з інтерфейсом подій IMediaEventEx за адресою '+
+              IntToStr(Cardinal(Self.cMediaEvent))+ ' зберігається стан зупинки протягом '+
+              IntToStr(c_WaitTimeOut) +
+              ' мс. Джерело відео не розпізнане як локальне.'+
+              ' Тому граф буде звільнений для розвантаження кодеків, мережі і сервера...');
+
+            Self.cGraphController.QueryNewState('','', True,
+              Self.cGraphController.cDestState);
           End;
+          //2019.03.25./
+
 
           //Self.cGraphController.LogMessage(Self, cs_ProcName +
           //  ': у графі з інтерфейсом подій IMediaEventEx за адресою '+
@@ -1320,7 +1459,7 @@ Begin
   Begin
     Self.cGraphController.GetRunningState(Self,
           ccIntermediateState,
-          ccCantCueState, ccStateRes, 0);
+          ccCantCueState, ccStateRes, Self.cGraphController.GraphWaitTimeOut);
   End;
 End;
 
@@ -1544,10 +1683,13 @@ constructor TDirectShowGraphController.Create(sLogFile:TLogFile = Nil;
 const cs_ProcName = 'TDirectShowGraphController.Create';
 Begin
   Inherited Create(True);
-
+  Self.cGraphWaitTimeOut:= ci_WaitTimeOut;
   Self.FreeOnTerminate:=False;
 
   Self.cLogFile:= sLogFile;
+  Self.cOnLogMessage:= Nil;
+
+  Self.LogMessage(Nil, 'Об''єкт роботи з графом створюється...', False);
 
   Self.cDoRebuildGraph:= False;  // вмикач обов'язкової перебудови графа
 
@@ -1563,6 +1705,8 @@ Begin
 
   Self.cOnStateChange:= Nil;
   Self.cOnGraphEvent:= Nil;
+  Self.cOnPositionGot:= Nil;
+  Self.cOnAvailablePositionsGot:= Nil;
 
       // Поточний мережевий потік чи файл:
   Self.cUrl:= '';
@@ -1575,8 +1719,11 @@ Begin
   Self.cDestUrlIsLocal:= False;
     // Перемотки спочатку не треба:
   Self.cNewPositionQueried:= False;
+  Self.cReadCurPositionQueried:= False;
+  self.cReadAvailPositionsQueried:= False;
   Self.cDestPosition:= 0;
   Self.cDestPositionIsRelative:= False;
+  Self.cSeekToKeyFrame:= False;
     // Поточний тип часу графа буде прочитаний із нього при створенні графа:
   Self.cTimeFormat:= GUID_NULL;
     //   Бажаний тип часу графа не заданий. Буде заповнений поточним
@@ -1655,9 +1802,13 @@ Begin
 
   Self.cOnStateChange:= Nil;
   Self.cOnGraphEvent:= Nil;
+  Self.cOnPositionGot:= Nil;
+  Self.cOnAvailablePositionsGot:= Nil;
 
   SysUtils.FreeAndNil(Self.cDestStateUseSection);
   SysUtils.FreeAndNil(Self.cGraphBuilderUseSection);
+
+  Self.LogMessage(Nil, 'Об''єкт роботи з графом звільняється, запис в журнал закінчено.', False);
 
   Self.cLogFile:= Nil;
 
@@ -2097,6 +2248,17 @@ Begin
     Self.cOnStateChange:= Value;
 End;
 
+Procedure TDirectShowGraphController.SetOnPositionGot(Value: TCallFromThreadOnPositionGot);
+Begin
+  Self.cOnPositionGot:= Value;
+End;
+
+Procedure TDirectShowGraphController.SetOnAvailablePositionsGot(Value: TCallFromThreadOnAvailablePositionsGot);
+Begin
+   Self.cOnAvailablePositionsGot:= Value;
+End;
+
+
 // Запускає граф на відтворення або на паузу.
 // Налаштовує відеовікно, якщо його параметри були задані
 // у SetupVideoWindow:
@@ -2414,7 +2576,7 @@ Begin
   end;
 End;
 
-Procedure TDirectShowGraphController.LogMessage(sCurThread:TThread;
+Procedure TDirectShowGraphController.LogMessage(sCurThread:TAdvancedTerminatedThread;
         Const sMessage:String;
         sThisIsCriticalError:Boolean = False);
 const cs_ProcName = 'TDirectShowGraphController.LogMessage';
@@ -2471,7 +2633,7 @@ End;
 
  // Може викликатися з різних потоків, в тому числі із головного.
 Function TDirectShowGraphController.QueryNewPos(Const sPosition:Int64;
-          sPositionIsRelativeToCurrent:Boolean):Boolean;
+          sPositionIsRelativeToCurrent, sSeekToKeyFrame:Boolean):Boolean;
 Const cs_ProcName = 'TDirectShowGraphController.QueryNewPos';
 Begin
   Result:=True;
@@ -2480,15 +2642,57 @@ Begin
   try
     Self.cDestPosition:= sPosition;
     Self.cDestPositionIsRelative:= sPositionIsRelativeToCurrent;
+    Self.cSeekToKeyFrame:= sSeekToKeyFrame;
     Self.cNewPositionQueried:= True;
+
+        // Будимо потік якщо він спить щоб він прочитав нові параметри і
+        // налаштував граф:
+    while Self.Suspended do Self.Resume;
   finally
     Self.cDestStateUseSection.Leave;
   end;
 End;
 
+Procedure TDirectShowGraphController.QueryAvailablePositions;
+Begin
+  Self.cDestStateUseSection.Enter;
+  try
+    Self.cReadAvailPositionsQueried:= True;
+
+        // Будимо потік якщо він спить щоб він прочитав команди і обробив їх:
+    while Self.Suspended do Self.Resume;
+  finally
+    Self.cDestStateUseSection.Leave;
+  end;
+End;
+
+Procedure TDirectShowGraphController.QueryPosition;
+Begin
+  Self.cDestStateUseSection.Enter;
+  try
+    Self.cReadCurPositionQueried:= True;
+
+        // Будимо потік якщо він спить щоб він прочитав команди і обробив їх:
+    while Self.Suspended do Self.Resume;
+  finally
+    Self.cDestStateUseSection.Leave;
+  end;
+End;
+
+Procedure TDirectShowGraphController.RewindToPos(sPosition:Int64;
+        sRelativeToCurrent:Boolean = False; sToKeyFrame:Boolean = False);
+Begin
+  Self.QueryNewPos(sPosition, sRelativeToCurrent, sToKeyFrame);
+End;
+
+Procedure TDirectShowGraphController.Rewind;
+Begin
+  Self.QueryNewPos(0, False, True);
+End;
+
 procedure TDirectShowGraphController.QueryTimeFormat(Value:TGUID);
 Begin
-  if Self.cDestTimeFormat = Value then Exit;
+  if IsEqualGUID(Self.cDestTimeFormat, Value) then Exit;
 
   Self.cDestStateUseSection.Enter;
   try
@@ -2498,13 +2702,25 @@ Begin
   end;
 End;
 
+procedure TDirectShowGraphController.SetGraphWaitTimeOut(Value: DWord);
+Begin
+  if Self.cGraphWaitTimeOut = Value then Exit;
+  Self.cDestStateUseSection.Enter;
+  try
+    Self.cGraphWaitTimeOut:= Value;
+  finally
+    Self.cDestStateUseSection.Leave;
+  end;
+End;
+
 Function TDirectShowGraphController.ReadGraphTimeFormat: TGUID;
 const cs_ProcName = 'TDirectShowGraphController.ReadGraphTimeFormat';
 Var ccTimeFormat:TGUID;
     ccRes:HResult; ccAssigned:Boolean;
-    ccThread:TThread;
+    ccThread:TAdvancedTerminatedThread;
 Begin
   ccAssigned:= False;
+  ccRes:= 0;
   ccThread:= Nil;
   Result:= GUID_NULL;
   Self.cGraphBuilderUseSection.Enter;
@@ -2562,12 +2778,15 @@ End;
 Procedure TDirectShowGraphController.SetGraphTimeFormat(Const sTimeFormat:TGUID);
 const cs_ProcName = 'TDirectShowGraphController.SetGraphTimeFormat';
 Var ccTimeFormat: TGUID; ccRes:HResult; ccInterfaceAssigned: Boolean;
-    ccThread:TThread;
+    ccThread:TAdvancedTerminatedThread;
 Begin
   ccTimeFormat:= Self.GetCurTimeFormat;
 
   if Not(IsEqualGUID(ccTimeFormat, sTimeFormat)) then
   Begin
+    ccInterfaceAssigned:= False;
+    ccRes:= 0;
+
     Self.cGraphBuilderUseSection.Enter;
     try
       if System.Assigned(Self.cMediaSeeking) then
@@ -2610,22 +2829,35 @@ Begin
 End;
 
 Function TDirectShowGraphController.SetPosition(Const sPosition:Int64;
-  sPositionIsRelativeToCur:Boolean):Boolean;
+  sPositionIsRelativeToCur, sSeekToKeyFrame:Boolean):Boolean;
 const cs_ProcName = 'TDirectShowGraphController.SetPosition';
 Var ccRes:HResult; ccInterfaceAssigned:Boolean;
-    ccThread:TThread;
+    ccThread:TAdvancedTerminatedThread;
+    ccFlags: DWord;
+    ccPosition, ccStopPosition: Int64;
 Begin
+  Result:= False;
+  if sPositionIsRelativeToCur then
+    ccFlags:=
+      AM_SEEKING_RelativePositioning
+  Else
+    ccFlags:=
+      AM_SEEKING_AbsolutePositioning;
 
+  if sSeekToKeyFrame then
+    ccFlags:= ccFlags or AM_SEEKING_SeekToKeyFrame;
 
-//  sFlags:Boolean =
-//    AM_SEEKING_AbsolutePositioning or AM_SEEKING_SeekToKeyFrame
-
+  ccInterfaceAssigned:= False;
+  ccRes:= 0;
   Self.cGraphBuilderUseSection.Enter;
   try
     if System.Assigned(Self.cMediaSeeking) then
     Begin
-      ccRes:= Self.cMediaSeeking.SetPositions(sPosition, sFlags,
-        0, AM_SEEKING_NoPositioning);
+      ccPosition:= sPosition;
+      //  Позиція зупинки не змінюється, але передати вказівник на параметр треба...
+      ccStopPosition:= 0;
+      ccRes:= Self.cMediaSeeking.SetPositions(ccPosition, ccFlags,
+        ccStopPosition, AM_SEEKING_NoPositioning);
       ccInterfaceAssigned:= True;
     End;
   finally
@@ -2643,14 +2875,206 @@ Begin
       Self.LogMessage(ccThread, HResultToStr(cs_ProcName +
           ': не вдалося встановити позицію графа '+
           IntToStr(sPosition)+': ', ccRes));
-    End;
+    End
+    Else Result:= True;
   End
   Else
   Begin
-     Self.LogMessage(ccThread, cs_ProcName +
+    Self.LogMessage(ccThread, cs_ProcName +
+        cs_SeekingInterfaceNotAssigned);
+  End;
+
+  if Result then
+  Begin
+    //   Запит виконано, скидаємо прапорець:
+    Self.cDestStateUseSection.Enter;
+    try
+      Self.cNewPositionQueried:= False;
+    finally
+      Self.cDestStateUseSection.Leave;
+    end;
+  End;
+End;
+
+Function TDirectShowGraphController.GetPosition(sCaller: TAdvancedTerminatedThread; Var dPosition, dStopPosition:Int64):Boolean;
+const cs_ProcName = 'TDirectShowGraphController.GetPosition';
+Var ccRes:HResult; ccInterfaceAssigned:Boolean;
+    ccPosition, ccStopPosition:Int64;
+    ccThread:TAdvancedTerminatedThread;
+Begin
+  Result:= False;
+  ccInterfaceAssigned:= False;
+  ccRes:= 0;
+  ccPosition:=0;
+  ccStopPosition:= 0;
+
+  Self.cGraphBuilderUseSection.Enter;
+  try
+    if System.Assigned(Self.cMediaSeeking) then
+    Begin
+      ccRes:= Self.cMediaSeeking.GetPositions(ccPosition, ccStopPosition);
+      ccInterfaceAssigned:= True;
+    End;
+  finally
+    Self.cGraphBuilderUseSection.Leave;
+  end;
+
+  ccThread:= sCaller;
+  if Not Assigned(ccThread) then
+  Begin
+    if Windows.GetCurrentThreadId = Self.ThreadID then
+      ccThread:= Self;
+  End;
+
+  dPosition:= ccPosition;
+  dStopPosition:= ccStopPosition;
+
+  if ccInterfaceAssigned then
+  Begin
+    if Failed(ccRes) then
+    Begin
+      if Not(Cardinal(ccRes) = ci_NotWindableError) then
+        Self.LogMessage(ccThread, HResultToStr(cs_ProcName +
+            ': не вдалося отримати позицію відтворення графа: ', ccRes));
+    End
+    Else Result:= True;
+  End
+  Else
+  Begin
+    Self.LogMessage(ccThread, cs_ProcName +
         cs_SeekingInterfaceNotAssigned);
   End;
 End;
+Function TDirectShowGraphController.GetAvailPositions(sCaller: TAdvancedTerminatedThread; Var dEarliest, dLatest:Int64):Boolean;
+const cs_ProcName = 'TDirectShowGraphController.GetAvailPositions';
+Var ccRes:HResult; ccInterfaceAssigned:Boolean;
+    ccStartPosition, ccLastPosition:Int64;
+    ccThread:TAdvancedTerminatedThread;
+Begin
+  Result:= False;
+  ccInterfaceAssigned:= False;
+  ccRes:= 0;
+  ccStartPosition:=0;
+  ccLastPosition:= 0;
+
+  Self.cGraphBuilderUseSection.Enter;
+  try
+    if System.Assigned(Self.cMediaSeeking) then
+    Begin
+      ccRes:= Self.cMediaSeeking.GetAvailable(ccStartPosition, ccLastPosition);
+      ccInterfaceAssigned:= True;
+    End;
+  finally
+    Self.cGraphBuilderUseSection.Leave;
+  end;
+
+  ccThread:= sCaller;
+  if Not Assigned(ccThread) then
+  Begin
+    if Windows.GetCurrentThreadId = Self.ThreadID then
+      ccThread:= Self;
+  End;
+
+  dEarliest:= ccStartPosition;
+  dLatest:= ccLastPosition;
+
+  if ccInterfaceAssigned then
+  Begin
+    if Failed(ccRes) then
+    Begin
+      if Not(Cardinal(ccRes) = ci_NotWindableError) then
+        Self.LogMessage(ccThread, HResultToStr(cs_ProcName +
+            ': не вдалося отримати кінцеві позиціі відтворення графа: ', ccRes));
+    End
+    Else Result:= True;
+  End
+  Else
+  Begin
+    Self.LogMessage(ccThread, cs_ProcName +
+        cs_SeekingInterfaceNotAssigned);
+  End;
+End;
+Function TDirectShowGraphController.CallBackAboutPosition(sCaller: TAdvancedTerminatedThread):Boolean;
+const cs_ProcName = 'TDirectShowGraphController.CallBackAboutPosition';
+Var ccPosition, ccStopPosition: Int64; ccTimeFormat:TGUID;
+    ccErrorMessage:String;
+    ccOnPositionGot: TCallFromThreadOnPositionGot;
+Begin
+  ccErrorMessage:= '';
+  ccOnPositionGot:= Self.cOnPositionGot;
+
+  if Assigned(ccOnPositionGot) then
+  Begin
+    ccTimeFormat:= Self.TimeFormat;
+    Result:= Self.GetPosition(sCaller, ccPosition, ccStopPosition);
+
+    try
+      ccOnPositionGot(sCaller,
+        ccPosition, ccStopPosition,
+        ccTimeFormat);
+    except
+      on E:Exception do
+        Begin
+          ccErrorMessage:= cs_ProcName +
+            cs_ErrorInProcessor +'OnPositionGot: '+ E.ToString;
+        End;
+    End;
+    if ccErrorMessage<>'' then Self.LogMessage(sCaller, ccErrorMessage);
+  end
+  Else Result:= False;
+
+  if Result then
+  Begin
+      //   Якщо був запит на отримання поточної позиції то скидаємо його::
+    Self.cDestStateUseSection.Enter;
+    try
+      Self.cReadCurPositionQueried:= False;
+    finally
+      Self.cDestStateUseSection.Leave;
+    end;
+  End;
+End;
+
+Function TDirectShowGraphController.CallBackAboutAvailPositions(sCaller: TAdvancedTerminatedThread):Boolean;
+const cs_ProcName = 'TDirectShowGraphController.CallBackAboutAvailPositions';
+Var ccEarliest, ccLatest: Int64; ccTimeFormat:TGUID;
+    ccErrorMessage:String;
+    ccOnAvailablePositionsGot: TCallFromThreadOnAvailablePositionsGot;
+Begin
+  ccErrorMessage:= '';
+  ccOnAvailablePositionsGot:= Self.cOnAvailablePositionsGot;
+
+  if Assigned(ccOnAvailablePositionsGot) then
+  Begin
+    ccTimeFormat:= Self.TimeFormat;
+    Result:= Self.GetAvailPositions(sCaller, ccEarliest, ccLatest);
+
+    try
+      ccOnAvailablePositionsGot(sCaller,
+        ccEarliest, ccLatest, ccTimeFormat);
+    except
+      on E:Exception do
+        Begin
+          ccErrorMessage:= cs_ProcName +
+            cs_ErrorInProcessor +'OnAvailablePositionsGot: '+ E.ToString;
+        End;
+    End;
+    if ccErrorMessage<>'' then Self.LogMessage(sCaller, ccErrorMessage);
+  End
+  Else Result:= False;
+
+  if Result then
+  Begin
+      //   Якщо був запит на отримання позицій то скидаємо його::
+    Self.cDestStateUseSection.Enter;
+    try
+      Self.cReadAvailPositionsQueried:= False;
+    finally
+      Self.cDestStateUseSection.Leave;
+    end;
+  End;
+End;
+
 
 
  // Може викликатися з різних потоків, в тому числі із головного.
@@ -2701,6 +3125,15 @@ Begin
   Result:= Self.QueryNewState(Url, Name_ch, sForceRebuildGraph, State_Running);
 End;
 
+procedure TDirectShowGraphController.SetURL(Value:String);
+Begin
+  Self.QueryNewState(Value, '', False, Self.cDestState);
+End;
+procedure TDirectShowGraphController.SetChName(Value:String);
+Begin
+  Self.QueryNewState('', Value, False, Self.cDestState);
+End;
+
 Function TDirectShowGraphController.Pause(Const Url:String = '';
         Const Name_ch:String = '';
         sForceRebuildGraph:Boolean = False):Boolean;
@@ -2749,27 +3182,36 @@ Var ccDoRebuildGraph:Boolean;
 
     ccGraphTuned, ccDoRun, ccNewPositionQueried:Boolean;
     ccDestPosition: Int64;
-    ccsDestPositionIsRelative:Boolean;
+    ccDestPositionIsRelative, ccSeekToKeyFrame:Boolean;
+
+    ccReadAvailPositionsQueried, ccReadCurPositionQueried: Boolean;
+    ccGraphWaitTimeOut: DWord;
 
     Procedure ProcCheckStateForRun;
     Begin
-        // Для відтворення або постановки на паузу треба щоб:
-      ccDoRebuildGraph:= ccDoRebuildGraph or
-        (Not(Assigned(Self.FGraphBuilder)))  // - граф був створений
-        or (ccCantCueState)                  // - міг опрацьовувати дані
-          // - не був у стані зупинки (бо зупинений граф не завжди
-          // можливо запустити знову через те що фільтри джерел можуть втратити
-          // з ними з'єднання через простій, і відновлюють його тільки при
-          // перепідключенні. При цьому в них оновлюються піни, і від них знову
-          // треба будувати).
-          // Тому зупинений граф перебудовуємо для нового запуску:
-        or ((ccCurState = State_Stopped) and (Not(ccDestUrlIsLocal)));
-
-      if Not(ccDoRebuildGraph) then
+      if ccDestState = State_Stopped then
+        ccDoRebuildGraph:= Not(ccDestUrlIsLocal)
+      Else
       Begin
-            //   Також коли треба відкрити інший потік то для нього треба
-            // побудувати інший граф:
-        if Not(ccDUrl=Self.cUrl) then ccDoRebuildGraph:= True;
+
+          // Для відтворення або постановки на паузу треба щоб:
+        ccDoRebuildGraph:= ccDoRebuildGraph or
+          (Not(Assigned(Self.FGraphBuilder)))  // - граф був створений
+          or (ccCantCueState)                  // - міг опрацьовувати дані
+            // - не був у стані зупинки (бо зупинений граф не завжди
+            // можливо запустити знову через те що фільтри джерел можуть втратити
+            // з ними з'єднання через простій, і відновлюють його тільки при
+            // перепідключенні. При цьому в них оновлюються піни, і від них знову
+            // треба будувати).
+            // Тому зупинений граф перебудовуємо для нового запуску:
+          or ((ccCurState = State_Stopped) and (Not(ccDestUrlIsLocal)));
+
+        if Not(ccDoRebuildGraph) then
+        Begin
+              //   Також коли треба відкрити інший потік то для нього треба
+              // побудувати інший граф:
+          if Not(ccDUrl=Self.cUrl) then ccDoRebuildGraph:= True;
+        End;
       End;
 
       ccGraphTuned:= Not(ccDoRebuildGraph);
@@ -2800,7 +3242,12 @@ Begin
         ccNewPositionQueried:= Self.cNewPositionQueried;
         //Self.cNewPositionQueried:= False;
         ccDestPosition:= Self.cDestPosition;
-        ccsDestPositionIsRelative:= Self.cDestPositionIsRelative;
+        ccDestPositionIsRelative:= Self.cDestPositionIsRelative;
+        ccSeekToKeyFrame:= Self.cSeekToKeyFrame;
+
+        ccReadAvailPositionsQueried:= Self.cReadAvailPositionsQueried;
+        ccReadCurPositionQueried:= Self.cReadCurPositionQueried;
+        ccGraphWaitTimeOut:= Self.GraphWaitTimeOut;
       finally
         Self.cDestStateUseSection.Leave;
       end;
@@ -2810,14 +3257,17 @@ Begin
       Self.cGraphBuilderUseSection.Enter;
       try
         ccCurState:= Self.GetRunningState(Self,
-          ccIntermediateState, ccCantCueState, ccStateRes, 0);
+          ccIntermediateState, ccCantCueState, ccStateRes, ccGraphWaitTimeOut);
 
         case ccDestState of
           State_Stopped:
             Begin
-                // Для зупинки графа не обов'язково його перебудовувати,
-                // якщо його немає то і зупиняти нічого...:
-              ccDoRebuildGraph:=False;
+//                2019.03.25: це так, але може треба звільнити граф при cDoRebuildGraph=True.
+//                тому закоментував:
+//                // Для зупинки графа не обов'язково його перебудовувати,
+//                // якщо його немає то і зупиняти нічого...:
+//              ccDoRebuildGraph:=False;
+              ProcCheckStateForRun;
 
               case ccCurState of
                 State_Stopped:;
@@ -2831,10 +3281,32 @@ Begin
                       ccGraphTuned:= False;
                       Self.LogMessage(Self, HResultToStr(cs_ProcName +
                         ': FMediaControl.Stop повідомило про помилку:', Res1));
-                    End;
+                    End;{
+                    //  2019.03.25: потік очікування подій графа слідкує тепер і за
+                    // тип щоб граф не лишався в стані зупинки надто довго
+                    // із запущеним мережевим відеопотоком... Проте при
+                    // зупинці графа він не рапортує про якісь події. Тому тут
+                    // після успішної зупинки інформуємо потік про те щоб він
+                    // перезапустив своє осікування подій і вів відлік таймаута
+                    // від цього момента:
+                    Else
+                      Self.cEventHandler.ResetWaitingForEvent;
+                    //  2019.03.25./}
                   End;
                 End;
               end;
+
+              //  2019.03.25: Graph will be freed if it is not local videofile
+              // and staying stopped too long:
+              if ccDoRebuildGraph then
+              Begin
+                If Self.ClearGraph then
+                Begin
+                  ccGraphTuned:= True;
+                  ccDoRebuildGraph:= False;
+                End;
+              End;
+              //  2019.03.25./
             End;
           State_Paused:
             Begin
@@ -2902,6 +3374,17 @@ Begin
               // Запускаємо обробку даних у графі і показуємо відеовікно, якщо
               // воно було налаштоване і граф реалізує для нього інтерфейс:
             ccGraphTuned:= Self.RunGraph(ccDestState = State_Paused);
+            if ccGraphTuned then
+            Begin
+              Self.cDestStateUseSection.Enter;
+              try
+                ccDoRebuildGraph:= False;
+                Self.cDoRebuildGraph:= False;
+//                              ccDoRebuildGraph:= Not(ccGraphTuned);
+              finally
+                Self.cDestStateUseSection.Leave;
+              end;
+            End;
           End
           else
           Begin
@@ -2912,11 +3395,14 @@ Begin
 
           // Встановлюємо потрібну позицію відтворення, якщо запитана:
         if ccNewPositionQueried then
-        Begin
-          Self.SetPosition(ccDestPosition);
-          //Self.cMediaSeeking.IsUsingTimeFormat(TIME_FORMAT_MEDIA_TIME)
-          //ccNewPositionQueried:= False;
-        End;
+          Self.SetPosition(ccDestPosition, ccDestPositionIsRelative,
+              ccSeekToKeyFrame);
+
+        if ccReadAvailPositionsQueried then
+          Self.CallBackAboutAvailPositions(Self);
+
+        if ccReadCurPositionQueried then
+          Self.CallBackAboutPosition(Self);
       finally
         Self.cGraphBuilderUseSection.Leave;
       end;
@@ -2926,7 +3412,7 @@ Begin
           // Читаємо поточний стан, викликаємо обробник зміни стану графа
           // якщо стан змінився і обробник заданий:
         ccCurState:= Self.GetRunningState(Self,
-          ccIntermediateState, ccCantCueState, ccStateRes, 0);
+          ccIntermediateState, ccCantCueState, ccStateRes, ccGraphWaitTimeOut);
 
         Self.Suspend;  // чекаємо на подальші події графа, і на команди зміни стану
       End
@@ -2957,7 +3443,7 @@ End;
 // і він викликає обробник, якому передає поточний потік,
 // який може бути потреба синхронізувати із головним потоком.
 // Тому в цей метод обов'язково має передаватися посилання на об'єкт потока:
-Function TDirectShowGraphController.GetRunningState(sCurThread:TThread;
+Function TDirectShowGraphController.GetRunningState(sCurThread:TAdvancedTerminatedThread;
           Var dSTATE_INTERMEDIATE:Boolean;
           Var dCANT_CUE:Boolean;
           Var dStateRes:HResult;
@@ -3007,7 +3493,7 @@ Begin
         S_OK:;
         VFW_S_STATE_INTERMEDIATE: dSTATE_INTERMEDIATE:= True;
         VFW_S_CANT_CUE: dCANT_CUE:= True;
-        Else Self.LogMessage(Nil, HResultToStr(cs_ProcName +
+        Else Self.LogMessage(sCurThread, HResultToStr(cs_ProcName +
           ': стан відтворення незвичний: ', Res1));
       end;
       Result:= ccState;
@@ -3101,7 +3587,7 @@ Begin
         End;
     end;
 
-    if cErrorMessage<>'' then Self.LogMessage(Nil, cErrorMessage);
+    if cErrorMessage<>'' then Self.LogMessage(sCurThread, cErrorMessage);
 
     cErrorMessage:= '';
 
@@ -3122,7 +3608,10 @@ Begin
       end;
     End;
 
-    if cErrorMessage<>'' then Self.LogMessage(Nil, cErrorMessage);
+    if cErrorMessage<>'' then Self.LogMessage(sCurThread, cErrorMessage);
+    Self.CallBackAboutAvailPositions(sCurThread);
+    Self.CallBackAboutPosition(sCurThread);
+
   End;
 End;
 
@@ -3234,7 +3723,7 @@ End;
 Function ProcDShowEvent(sIMediaEvent:IMediaEvent;
            sHandler: TProcDShowEvent;
            sMessageLogProc:TMessageLogProc = Nil;
-           sCurThread:TThread = Nil):Boolean;
+           sCurThread:TAdvancedTerminatedThread = Nil):Boolean;
 Const sc_ProcName = 'ProcDShowEvent';
 Var cEvCode:Longint; dlParam1, dlParam2:Longint;
     cRes:HResult;
@@ -4729,12 +5218,18 @@ End;
 
 constructor TSampleGrabberCapturer.Create(
         sGraphController:TPlayVideoGraphController = Nil;
-        CreateSuspended:Boolean = False);
+        CreateSuspended:Boolean = False;
+        sMaxSampleReceiveCountPerSecond:Integer = 0);
 Const cs_ProcName = 'TSampleGrabberCapturer.Create';
 Begin
   Inherited Create(True);
 
   Self.FreeOnTerminate:=False;
+
+  Self.cLastSampleAcceptedTick:= 0;
+  Self.cLastSecondStart:= Windows.GetTickCount;
+  Self.cLastSecondSamplesReceivedCount:= 0;
+  Self.cMaxSampleReceiveCountPerSecond:= sMaxSampleReceiveCountPerSecond;
 
   Self.cGraphController:= sGraphController;
   Self.cSampleQueriedCount:= 0;
@@ -4921,23 +5416,92 @@ Begin
   Result:= E_NOTIMPL;
 End;
 
+Procedure TSampleGrabberCapturer.SetMaxSampleReceiveCountPerSecond(Value:Integer);
+Begin
+  Self.cDataUseSection.Enter;
+  try
+    Self.cMaxSampleReceiveCountPerSecond:= Value;
+  finally
+    Self.cDataUseSection.Leave;
+  end;
+End;
+
+Function TSampleGrabberCapturer.CheckSampleAccepted:Boolean;
+Var ccCurTicks:Cardinal;
+Begin
+  Result:= True;
+
+  Self.cDataUseSection.Enter;
+  try
+    if Self.cSampleQueriedCount <= 0 then Result:= False
+    Else
+    Begin
+      ccCurTicks:= Windows.GetTickCount;
+         // Не подавляємо повідомлення від пристрою довше за таймаут:
+      if Not(ccCurTicks-Self.cLastSampleAcceptedTick >=
+          Self.cGraphController.GraphWaitTimeOut) then
+      Begin
+        // Перевірка повторювання кадрів не підтримується наразі...:
+        {  // Подавлення повідомлень що повторюються (якщо це ввімкнено):
+        if Self.SuppressEqualMessages then
+        Begin
+          if sdPrevMessage = sMessage then
+          Begin
+            Result:= False;
+            Exit;
+          End;
+        End;}
+          // Подавлення повідомлень, що йдуть із надто великою швидкістю:
+        if Self.MaxSampleReceiveCountPerSecond > 0 then
+        Begin
+          if ccCurTicks < Self.cLastSecondStart then // якщо відбувся перехід через максимальну кількість тіків...:
+            Self.cLastSecondStart:= 0;
+
+          if (ccCurTicks - Self.cLastSecondStart) > ic_MessageSpeedTimeUnit then
+          Begin     // почалася нова секунда... це повідомлення отримуємо:
+            Self.cLastSecondSamplesReceivedCount:= 0;
+            Self.cLastSecondStart:= ccCurTicks;
+          End
+          Else if Self.cLastSecondSamplesReceivedCount >=
+                    Self.MaxSampleReceiveCountPerSecond then
+          Begin    // якщо кількість повідомлень на секунду перевищена:
+            Result:= False;
+          End;
+
+          Inc(Self.cLastSecondSamplesReceivedCount);
+        End;
+      End;
+
+      if Result then
+      Begin
+        Self.cLastSampleAcceptedTick:= ccCurTicks;
+//        sdPrevMessage:= sMessage;
+      End;
+    End;
+  finally
+    Self.cDataUseSection.Leave;
+  end;
+End;
+
 function  TSampleGrabberCapturer.SampleCB(SampleTime: Double;
   pSample: IMediaSample): HResult;
 Const cs_ProcName = 'TSampleGrabberCapturer.SampleCB';
 Var ccMediaType:PAMMediaType; ccRes:HResult; ccBufSize:LongInt;
     ccBMIInfo: TBitmapInfoHeader; ccBuffer:PByte;
 Begin
+  try
   Result:= S_OK;
     // Не приймаємо кадри, якщо потік, що їх оброблює,
-    // завершився (йому скомандували завершгитися):
+    // завершився (йому скомандували завершитися):
   if Self.Finished then
     Exit;
 
 
   //Self.cDataUseSection.Enter;
-
+  // Якщо є запит захопити кадр і його не треба пропустити:
+  if Self.CheckSampleAccepted then
   //try
-    if Self.cSampleQueriedCount > 0 then // є запит захопити кадр
+//    if Self.cSampleQueriedCount > 0 then // є запит захопити кадр
     Begin
       ccMediaType:= Nil;
 
@@ -5038,6 +5602,14 @@ Begin
   //finally
   //  Self.cDataUseSection.Leave;
   //end;
+  except
+    on E:Exception do
+    begin
+      Result:= E_FAIL;
+      Self.cGraphController.LogMessage(Nil, cs_ProcName + sc_FallenOnError+
+        E.ToString);
+    end;
+  end;
 End;
 
 function TSampleGrabberRGB24BMPCapturer.InitSampleGrabber:ISampleGrabber;
@@ -5140,7 +5712,9 @@ Begin
       // запити про кадри немає сенсу. Інакше - додаємо:
     if Self.cSampleQueriedCount <> c_SamplesInfinite then
     Begin
-      Self.cSampleQueriedCount:= Self.cSampleQueriedCount + cSamplesCount;
+      if cSamplesCount = c_SamplesInfinite then
+        Self.cSampleQueriedCount:= cSamplesCount
+      else Self.cSampleQueriedCount:= Self.cSampleQueriedCount + cSamplesCount;
     End;
   finally
     Self.cDataUseSection.Leave;
@@ -5156,7 +5730,8 @@ End;
          //   CaptureSamples(0) не робить ефекту:
 procedure TCaptureImageGraphController.CaptureSamples(cSamplesCount:Cardinal = c_SamplesInfinite);
 Begin
-  Self.cGraphBuilderUseSection.Enter;
+//  Self.cGraphBuilderUseSection.Enter;
+  Self.cSampleGrabberCapturerUseSection.Enter;
   try
     if Assigned(Self.cSampleGrabberCapturer) then
     Begin
@@ -5172,7 +5747,8 @@ Begin
       End;
     End;
   finally
-    Self.cGraphBuilderUseSection.Leave;
+//    Self.cGraphBuilderUseSection.Leave;
+    Self.cSampleGrabberCapturerUseSection.Leave;
   end;
 End;
 
@@ -5180,7 +5756,8 @@ End;
    // їх захоплення:
 procedure TCaptureImageGraphController.StopCaptureSamples;
 Begin
-  Self.cGraphBuilderUseSection.Enter;
+//  Self.cGraphBuilderUseSection.Enter;
+  Self.cSampleGrabberCapturerUseSection.Enter;
   try
     if Assigned(Self.cSampleGrabberCapturer) then
     Begin
@@ -5192,7 +5769,8 @@ Begin
       Self.cSampleQueriedCount:= 0;
     End;
   finally
-    Self.cGraphBuilderUseSection.Leave;
+//    Self.cGraphBuilderUseSection.Leave;
+    Self.cSampleGrabberCapturerUseSection.Leave;
   end;
 End;
 
@@ -5383,10 +5961,14 @@ begin
      //   Спочатку захоплювач кадрів не створений.
      // Він створюється при створенні графа:
   Self.cSampleGrabberCapturer:= Nil;
+
+  Self.cSampleGrabberCapturerUseSection:= TCriticalSection.Create;
+
   Self.cOnSample:= Nil;
   Self.cSampleQueriedCount:= 0;
 
   Self.cAfterStop:= Self.ProcAfterStop;
+  Self.cMaxSampleReceiveCountPerSecond:= 0;
 
   if Not CreateSuspended then Self.Resume;
 end;
@@ -5413,7 +5995,7 @@ Begin
   End;
 End;
 
-Procedure TCaptureBitmapGraphController.ProcOnSample(sCaller: TThread;
+Procedure TCaptureBitmapGraphController.ProcOnSample(sCaller: TAdvancedTerminatedThread;
         sSample:PBMPSampleRec);
 Const cs_ProcName = 'TCaptureBitmapGraphController.ProcOnSample';
 Var ccOnSampleAsBitmap: TCallFromThreadOnSampleAsBitmap;
@@ -5440,7 +6022,7 @@ Begin
         DIB_RGB_COLORS, ccBufferInBitmap, 0, 0);
       if ccDIBHandle = 0 then
       Begin
-        Self.LogMessage(Nil, FormatLastOSError(cs_ProcName +
+        Self.LogMessage(sCaller, FormatLastOSError(cs_ProcName +
               ': CreateDIBSection повідомило про помилку: ').Message);
         Exit;
       End;
@@ -5454,7 +6036,7 @@ Begin
       except
         on E:Exception do
         Begin
-          Self.LogMessage(Nil, cs_ProcName +
+          Self.LogMessage(sCaller, cs_ProcName +
             cs_OnSampleException +
             E.ToString);
         End;
@@ -5488,7 +6070,7 @@ Begin
   End;
 End;
 
-Procedure TCaptureJpegGraphController.ProcOnSample(sCaller: TThread;
+Procedure TCaptureJpegGraphController.ProcOnSample(sCaller: TAdvancedTerminatedThread;
         sSample:Graphics.TBitmap);
 Const cs_ProcName = 'TCaptureJpegGraphController.ProcOnSample';
 Var ccOnSampleAsJpeg: TCallFromThreadOnSampleAsJpeg;
@@ -5508,7 +6090,7 @@ Begin
       except
         on E:Exception do
         Begin
-          Self.LogMessage(Nil, cs_ProcName +
+          Self.LogMessage(sCaller, cs_ProcName +
             cs_OnSampleException +
             E.ToString);
         End;
@@ -5572,7 +6154,7 @@ Begin
 End;
 
 Procedure TCaptureJpegToFileGraphController.ProcOnSample(
-  sCaller: TThread; sSample:TJpegImage);
+  sCaller: TAdvancedTerminatedThread; sSample:TJpegImage);
 Const cs_ProcName = 'TCaptureJpegToFileGraphController.ProcOnSample';
 Var ccOnSampleAsJpegFile: TCallFromThreadOnSampleAsFile;
     //ccJpeg:TJpegImage;
@@ -5599,7 +6181,7 @@ Begin
     except
       on E:Exception do
         Begin
-          Self.LogMessage(Nil, cs_ProcName +
+          Self.LogMessage(sCaller, cs_ProcName +
             cs_OnSampleException +
             E.ToString);
         End;
@@ -5608,10 +6190,12 @@ Begin
 End;
 
 procedure TCaptureImageGraphController.Terminate;
+Var ccSampleGrabberCapturer: TSampleGrabberCapturer;
 Begin
   Inherited Terminate;
-  if Assigned(Self.cSampleGrabberCapturer) then
-    Self.cSampleGrabberCapturer.Terminate;
+  ccSampleGrabberCapturer:= Self.cSampleGrabberCapturer;
+  if Assigned(ccSampleGrabberCapturer) then
+    ccSampleGrabberCapturer.Terminate;
 End;
 
 destructor TCaptureImageGraphController.Destroy;
@@ -5623,6 +6207,7 @@ Begin
   End;
 
   SysUtils.FreeAndNil(Self.cSampleGrabberCapturer);
+  SysUtils.FreeAndNil(Self.cSampleGrabberCapturerUseSection);
 
   Inherited Destroy;
 End;
@@ -5722,7 +6307,8 @@ Begin
 
   if ccRenderSamples then
   Begin
-    Self.SampleGrabberCapturer:= TSampleGrabberRGB24BMPCapturer.Create(Self, False);
+    Self.SampleGrabberCapturer:= TSampleGrabberRGB24BMPCapturer.Create(Self,
+      False, Self.MaxSampleReceiveCountPerSecond);
     if Assigned(Self.SampleGrabberCapturer.SampleGrabber) then
     Begin
       ccSampleGrabber:= Self.SampleGrabberCapturer.SampleGrabber as IBaseFilter;
@@ -5827,18 +6413,25 @@ Begin
   ProcFreeVars;
 End;
 
-Procedure TCaptureImageGraphController.ProcAfterStop(sCaller: TThread;
+Procedure TCaptureImageGraphController.ProcAfterStop(sCaller: TAdvancedTerminatedThread;
         Const sState, sLastState:TFilterState;
         sSTATE_INTERMEDIATE, sCANT_CUE:Boolean;
         sStateRes, sLastStateRes:HResult;
          sCurURL, sLastURL, sCurName_ch:String);
 Begin
-    //   Після зупинки відтворення звільняємо захоплювач кадрів,
+//   Не треба цього... бо наступного разу захоплювач кадрів
+// буде створений тільки після перебудови графа. Але граф
+// може не перебудовуватися після зупинки якщо не змінилося джерело, і
+// він може бути запущений далі.
+//   При перебудові графа старий захоплювач кадрів буде звільнений при
+// присвоєнні посиланян на новий. При звільненні TCaptureImageGraphController
+// деструктор звільнить і SampleGrabberCapturer.
+ {   //   Після зупинки відтворення звільняємо захоплювач кадрів,
     // і читаємо перед тим чи є замовлені кадри, які він не
     // захопив (бо вони не прийшли до зупинки). При наступному запуску
     // і створенні захоплювача цю кількість кадрів буде скомандувано
     // захопити:
-  Self.SampleGrabberCapturer:= Nil;
+  Self.SampleGrabberCapturer:= Nil;}
 End;
 
 Function TCaptureImageGraphController.CreateNullRenderer(
@@ -5911,17 +6504,29 @@ End;
 
 function TSampleGrabberSampleObtainer.SampleCB(SampleTime: Double;
   pSample: IMediaSample): HResult; stdcall;
+const cs_ProcName = 'TSampleGrabberSampleObtainer.SampleCB';
 Var ccSampleGrabberCapturer: TSampleGrabberCapturer;
 Begin
-  Self.cSampleCapSection.Enter;
+  ccSampleGrabberCapturer:= Nil;
   try
-    ccSampleGrabberCapturer:= Self.cSampleGrabberCapturer;
-    if Assigned(ccSampleGrabberCapturer) then
-      Result:=ccSampleGrabberCapturer.SampleCB(SampleTime,
-        pSample)
-   else Result:= S_OK;
-  finally
-    Self.cSampleCapSection.Leave;
+    Self.cSampleCapSection.Enter;
+    try
+      ccSampleGrabberCapturer:= Self.cSampleGrabberCapturer;
+      if Assigned(ccSampleGrabberCapturer) then
+        Result:=ccSampleGrabberCapturer.SampleCB(SampleTime,
+          pSample)
+     else Result:= S_OK;
+    finally
+      Self.cSampleCapSection.Leave;
+    end;
+  except
+    on E:Exception do
+    begin
+      Result:= E_FAIL;
+      if Assigned(ccSampleGrabberCapturer) then
+      ccSampleGrabberCapturer.cGraphController.LogMessage(Nil, cs_ProcName + sc_FallenOnError+
+        E.ToString);
+    end;
   end;
 End;
 
@@ -5940,6 +6545,13 @@ Begin
   finally
     Self.cSampleCapSection.Leave;
   end;
+End;
+
+//  2019.03.25: Реалізація звільнення графа:
+Function TPlayVideoGraphController.ClearGraph:Boolean;
+Begin
+  if Assigned(Self.FGraphBuilder) then Self.FGraphBuilder:= NIL;
+  Result:= True;
 End;
 
 
@@ -5993,9 +6605,9 @@ begin
 
   //try
       //освобождаем подключенные интерфейсы
-    //if Assigned(Self.FMediaControl) then FMediaControl:= NIL;
-    //if Assigned(Self.FVideoWindow)  then FVideoWindow := NIL;
-    if Assigned(Self.FGraphBuilder) then Self.FGraphBuilder:= NIL;
+    //  2019.03.25: there is method now to clear graph:
+    if Not(Self.ClearGraph) then Exit;
+    //if Assigned(Self.FGraphBuilder) then Self.FGraphBuilder:= NIL;
 
       //   Выходим если канал не выбран:
     if sUrl='' then Exit;
@@ -6108,16 +6720,22 @@ Procedure TCaptureImageGraphController.SetOnSample(Value:TCallFromThreadOnSample
 Begin
   if Addr(Self.cOnSample)<>Addr(Value) then
   Begin
-    Self.cOnSample:= Value;
-    if Assigned(Self.SampleGrabberCapturer) then
-      Self.SampleGrabberCapturer.OnSample:= Value;
+    Self.cSampleGrabberCapturerUseSection.Enter;
+    try
+      Self.cOnSample:= Value;
+      if Assigned(Self.SampleGrabberCapturer) then
+        Self.SampleGrabberCapturer.OnSample:= Value;
+    finally
+      Self.cSampleGrabberCapturerUseSection.Leave;
+    end;
   End;
 End;
 
 Procedure TCaptureImageGraphController.SetSampleGrabberCapturer(
   Value:TSampleGrabberCapturer);
 Begin
-  Self.cGraphBuilderUseSection.Enter;
+//  Self.cGraphBuilderUseSection.Enter;
+  Self.cSampleGrabberCapturerUseSection.Enter;
   try
     if Self.cSampleGrabberCapturer<>Value then
     Begin
@@ -6146,7 +6764,24 @@ Begin
       End;
     End;
   finally
-    Self.cGraphBuilderUseSection.Leave;
+//    Self.cGraphBuilderUseSection.Leave;
+    Self.cSampleGrabberCapturerUseSection.Leave;
+  end;
+End;
+
+Procedure TCaptureImageGraphController.SetMaxSampleReceiveCountPerSecond(Value: Integer);
+Var ccSampleGrabberCapturer: TSampleGrabberCapturer;
+Begin
+//  Self.cGraphBuilderUseSection.Enter;
+  Self.cSampleGrabberCapturerUseSection.Enter;
+  try
+    ccSampleGrabberCapturer:= Self.cSampleGrabberCapturer;
+    if Assigned(ccSampleGrabberCapturer) then
+      ccSampleGrabberCapturer.MaxSampleReceiveCountPerSecond:= Value;
+    Self.cMaxSampleReceiveCountPerSecond:= Value;
+  finally
+//    Self.cGraphBuilderUseSection.Leave;
+    Self.cSampleGrabberCapturerUseSection.Leave;
   end;
 End;
 

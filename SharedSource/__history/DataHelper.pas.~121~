@@ -3,7 +3,7 @@ unit DataHelper;
 interface
 
 uses SysUtils, StrUtils, Classes, SyncObjs, AnsiStrings, Variants, Math,
- IdGlobal;
+ IdGlobal, Windows;
 
 const
       cByteBitCount = 8;
@@ -210,7 +210,14 @@ type
         Destructor Destroy; override;
     end;
 
-    TLogFile = class(TCustomTextFile)
+    TWritingTextFile = class(TCustomTextFile)
+      public
+        Procedure Flush;
+        Procedure Write(Const sText:String; sFinishLine:Boolean = False);
+        Procedure WriteLn(Const sText:String);
+    end;
+
+    TLogFile = class(TWritingTextFile)
     private
       //cFile: System.Text;
       //cFilePath: String;
@@ -237,9 +244,6 @@ type
       Procedure SetHideMessageWhenRepeatedMoreThan(Value: Cardinal);
 
       procedure ProcLogRepeating(Const sTimeToWrite:TDateTime);
-
-      procedure ProcWriteMessage(Const sMessage:String;
-        sFinishLine:Boolean = True);
     public
       //property Opened: Boolean read cOpened;
       //property FilePath:String read cFilePath;
@@ -258,7 +262,8 @@ type
         sHideMessageWhenRepeatedMoreThan: Cardinal = c_HideMessageWhenRepeatedMoreThan);
       Procedure Open(Const sPath:String); override;
       Procedure WriteMessage(Const sMessage:String;
-        sFinishLine:Boolean = True; sAddTimeStamp:Boolean = True);
+        sFinishLine:Boolean = True; sAddTimeStamp:Boolean = True;
+        sAddThreadID:Boolean = True);
       Procedure Close; override;
 
       //Destructor Destroy; override;
@@ -267,35 +272,8 @@ type
 
     TReadingTextFile = class(TCustomTextFile)
     private
-      //cFile: System.Text;
-      //cFilePath: String;
-      //cOpened: Boolean;
 
-      //cFileCriticalSection:SyncObjs.TCriticalSection;
-
-      //cLastLogTime: TDateTime;
-      //cLastLogLine: String;
-
-      //cLineRepeatCount: Cardinal;
-
-      //cMessageRepeatChecking:Boolean;
-      //cHideMessageWhenRepeatedMoreThan:Cardinal;
     protected
-
-      //Procedure ProcEnterCriticalSection;
-      //Procedure ProcLeaveCriticalSection;
-
-      //function GetLastLogLine: String;
-      //function GetLastLogLineNoTimeStamp: String;
-      //function GetLastLogTime: TDateTime;
-
-      //Procedure SetMessageRepeatChecking(Value: Boolean);
-      //Procedure SetHideMessageWhenRepeatedMoreThan(Value: Cardinal);
-
-      //procedure ProcLogRepeating(Const sTimeToWrite:TDateTime);
-
-      //procedure ProcWriteMessage(Const sMessage:String;
-      //  sFinishLine:Boolean = True);
 
       Function ProcReadLine:String;
     public
@@ -313,8 +291,6 @@ type
       Function SeekEOln:Boolean;
 
       Function ReadLine:String;
-      //Procedure Close; override;
-      //Destructor Destroy; override;
     end;
 
   TUIntList = class(Classes.TList)
@@ -966,7 +942,8 @@ begin
         if ccWordLength <> 2 then
         Begin
           sLogFile.WriteMessage('HexToBinString: Ожидаются 2-значные цифры... Значение не распознано: "'+
-            ss+'"...');
+            String(ss)+'"...');
+          ss:='';  // 2017.12.13. Коли щось не розпізнане - відкидаємо... а не ліпимо до нього нові символи сплошняком...
           Continue;
         End;
 
@@ -3005,6 +2982,10 @@ Function AddTimeStampToMessage(Const sMessage:String;
 Begin
   Result:= SysUtils.DateTimeToStr(sTime) + c_Space + sMessage;
 End;
+Function AddCurThreadIDToMessage(Const sMessage:String):String;
+Begin
+  Result:= SysUtils.IntToStr(Windows.GetCurrentThreadId) + c_Space + sMessage;
+End;
 
 procedure TLogFile.ProcLogRepeating(Const sTimeToWrite:TDateTime);
 Var cMessage:String;
@@ -3017,11 +2998,48 @@ Begin
       SysUtils.DateTimeToStr(Self.cLastLogTime)+': "'+
       Self.cLastLogLine+'"...', sTimeToWrite);
 
-    Self.ProcWriteMessage(cMessage);
+    Self.WriteLn(cMessage);
   End;
 End;
 
-procedure TLogFile.ProcWriteMessage(Const sMessage:String;
+Procedure TWritingTextFile.Flush;
+Begin
+  Self.ProcEnterCriticalSection;
+
+  try
+    if Self.cOpened then
+    Begin
+      System.Flush(Self.cFile);
+    End;
+  finally
+    Self.ProcLeaveCriticalSection;
+  end;
+End;
+
+Procedure TWritingTextFile.Write(Const sText:String; sFinishLine:Boolean = False);
+Begin
+  Self.ProcEnterCriticalSection;
+  try
+    if Not(Self.cOpened) then
+    Begin
+      Raise Exception.Create('Не удалось записать текст в файл "'+
+          Self.cFilePath+'", потому что он не открыт... Сообщение было "'+
+        sText + '".');
+    End;
+
+    if sFinishLine then
+      System.Writeln(Self.cFile, sText)
+    else System.Write(Self.cFile, sText);
+  finally
+    Self.ProcLeaveCriticalSection;
+  end;
+End;
+Procedure TWritingTextFile.WriteLn(Const sText:String);
+Begin
+  Self.Write(sText, True);
+End;
+
+{procedure TLogFile.ProcWriteMessage(Const sMessage:String;
         sFinishLine:Boolean = True);
 Begin
     // Критичну секцію тут не чіпаємо, це приватна процедура і в секцію мали вже зайти...
@@ -3035,7 +3053,7 @@ Begin
   if sFinishLine then
     System.Writeln(Self.cFile, sMessage)
   else System.Write(Self.cFile, sMessage);
-End;
+End;}
 
 Function TReadingTextFile.ProcReadLine:String;
 Begin
@@ -3060,7 +3078,8 @@ Begin
 End;
 
 Procedure TLogFile.WriteMessage(Const sMessage:String;
-        sFinishLine:Boolean = True; sAddTimeStamp:Boolean = True);
+        sFinishLine:Boolean = True; sAddTimeStamp:Boolean = True;
+        sAddThreadID:Boolean = True);
 Var cMessage:String; // cFormatSet:TFormatSettings;
     cTime:TDateTime;
     cDoNotHide:Boolean;
@@ -3093,11 +3112,14 @@ Begin
       Self.cLastLogLine:= sMessage;
 
          // Додаємо до повідомлення поточну дату і час щоб бачити час всіх подій, про які повідомляється:
-      if sAddTimeStamp then
-        cMessage:= AddTimeStampToMessage(sMessage, cTime)
-      Else cMessage:= sMessage;
+      cMessage:= sMessage;
 
-      Self.ProcWriteMessage(cMessage, sFinishLine);
+      if sAddThreadID then
+        cMessage:= AddCurThreadIDToMessage(cMessage);
+      if sAddTimeStamp then
+        cMessage:= AddTimeStampToMessage(cMessage, cTime);
+
+      Self.Write(cMessage, sFinishLine);
     End;
   finally
     Self.ProcLeaveCriticalSection;
@@ -3194,7 +3216,8 @@ Begin
         // Якщо повторювалися повідомлення - то пишемо про це перед тим як закрити файл..:
       Self.ProcLogRepeating(SysUtils.Now);
 
-      System.Flush(Self.cFile);
+      Self.Flush;
+//      System.Flush(Self.cFile);
 
       Inherited Close;
     End;
